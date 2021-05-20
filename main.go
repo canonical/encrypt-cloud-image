@@ -74,6 +74,8 @@ type Options struct {
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 
 	SRKPub string `long:"srk-pub" description:"Path to SRK public area"`
+
+	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 }
 
 type functionList struct {
@@ -536,6 +538,12 @@ func run(args []string) (err error) {
 		PCRPolicyCounterHandle: tpm2.HandleNull}
 	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
+	}
+
+	cmd := exec.LoggedCommand("cp", options.KernelEfi, filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"))
+	err = cmd.Run()
+	if err != nil {
+		return xerrors.Errorf("failed to install KernelEfi: %w", err)
 	}
 
 	return nil
