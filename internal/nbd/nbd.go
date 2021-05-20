@@ -114,20 +114,20 @@ type Connection struct {
 
 	logger log.FieldLogger
 
-	dev        nbdDev
-	qemuNbdErr chan error
+	dev         nbdDev
+	qemuNbdDone chan error
 }
 
-func (c *Connection) tryConnectToDevice(path string, dev nbdDev) error {
+func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
 	c.logger.Debugln("trying to connect to", dev)
 
-	cmd := internal_exec.LoggedCommand("udevadm", "monitor", "--kernel")
-	stdout, err := cmd.StdoutPipe()
+	udevadmCmd := internal_exec.LoggedCommand("udevadm", "monitor", "--kernel")
+	udevadmMonitor, err := udevadmCmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := udevadmCmd.Start(); err != nil {
 		return xerrors.Errorf("cannot start udevadm monitor: %w", err)
 	}
 
@@ -137,17 +137,18 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) error {
 	go func() {
 		cmd := internal_exec.LoggedCommand("qemu-nbd", "-v", "-c", dev.devPath(), path)
 		if err := cmd.Start(); err != nil {
-			c.qemuNbdErr <- err
+			c.qemuNbdDone <- err
 			return
 		}
 
 		qemuNbdStarted <- cmd.Process.Pid
-		c.qemuNbdErr <- cmd.Wait()
+		c.qemuNbdDone <- cmd.Wait()
 	}()
 
 	nbdConnected := make(chan struct{})
+	monitorDone := make(chan error)
 	go func() {
-		s := bufio.NewScanner(stdout)
+		s := bufio.NewScanner(udevadmMonitor)
 		for s.Scan() {
 			m := addEventRE.FindStringSubmatch(s.Text())
 			if m == nil {
@@ -157,28 +158,41 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) error {
 				nbdConnected <- struct{}{}
 			}
 		}
-		close(nbdConnected)
-	}()
-
-	defer func() {
-		c.logger.Debugln("killing udevadm monitor")
-		if err := cmd.Process.Kill(); err != nil {
-			c.logger.Warningln("cannot kill udevadm monitor:", err)
-		}
-		cmd.Wait()
-		for {
-			if _, ok := <-nbdConnected; !ok {
-				break
-			}
-		}
-		c.logger.Debugln("successfully killed udevadm monitor")
+		monitorDone <- s.Err()
 	}()
 
 	var pid int
 
+	defer func() {
+		c.logger.Debugln("killing udevadm monitor")
+		if err := udevadmCmd.Process.Kill(); err != nil {
+			c.logger.Errorln("cannot kill udevadm monitor:", err, "- will likely hang from here")
+		}
+		udevadmCmd.Wait()
+
+		c.logger.Debugln("waiting for udevadm monitor scanner goroutine to finish")
+	Loop:
+		for {
+			select {
+			case <-nbdConnected:
+			case <-monitorDone:
+				break Loop
+			}
+		}
+		c.logger.Debugln("successfully killed udevadm monitor")
+
+		if err != nil && pid > 0 {
+			c.logger.Debugln("encountered an error so making sure qemu-nbd is killed")
+			p, _ := os.FindProcess(pid)
+			if err := p.Kill(); err != nil {
+				c.logger.Errorln("cannot kill qemu-nbd:", err)
+			}
+		}
+	}()
+
 	for {
 		select {
-		case err := <-c.qemuNbdErr:
+		case err := <-c.qemuNbdDone:
 			c.logger.Debugln("qemu-nbd exitted with an error:", err)
 			var e *exec.ExitError
 			if xerrors.As(err, &e) && e.ExitCode() == 1 {
@@ -213,6 +227,8 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) error {
 			} else {
 				c.logger.Debugln("we haven't got the PID for qemu-nbd yet")
 			}
+		case err := <-monitorDone:
+			return xerrors.Errorf("udevadm monitor scanner goroutine returned unexpectedly: %w", err)
 		}
 	}
 }
@@ -258,7 +274,7 @@ func (c *Connection) Disconnect() error {
 		return err
 	}
 
-	if err := <-c.qemuNbdErr; err != nil {
+	if err := <-c.qemuNbdDone; err != nil {
 		c.logger.Warningln("qemu-nbd exitted with an error:", err)
 	}
 
@@ -271,7 +287,7 @@ func ConnectImage(path string) (*Connection, error) {
 		return nil, ErrKernelModuleNotLoaded
 	}
 
-	c := &Connection{sourcePath: path, qemuNbdErr: make(chan error)}
+	c := &Connection{sourcePath: path, qemuNbdDone: make(chan error)}
 	c.logger = log.WithField("nbd.Connection", fmt.Sprintf("%p", c))
 	c.logger.Debugln("created Connection for", path)
 
