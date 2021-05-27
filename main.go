@@ -513,6 +513,12 @@ func run(args []string) (err error) {
 		return nil
 	})
 
+	cmd := exec.LoggedCommand("cp", options.KernelEfi, filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"))
+	err = cmd.Run()
+	if err != nil {
+		return xerrors.Errorf("failed to install KernelEfi: %w", err)
+	}
+
 	efiEnv, err := newEFIEnvironment(&options)
 	if err != nil {
 		return xerrors.Errorf("cannot create EFI environment for target: %w", err)
@@ -538,12 +544,6 @@ func run(args []string) (err error) {
 		PCRPolicyCounterHandle: tpm2.HandleNull}
 	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
-	}
-
-	cmd := exec.LoggedCommand("cp", options.KernelEfi, filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"))
-	err = cmd.Run()
-	if err != nil {
-		return xerrors.Errorf("failed to install KernelEfi: %w", err)
 	}
 
 	return nil
