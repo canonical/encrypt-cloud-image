@@ -36,3 +36,13 @@ func CopyFromReaderToFile(dst string, src io.Reader) error {
 	_, err = io.Copy(f, src)
 	return err
 }
+
+func CopyFile(dst, src string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return xerrors.Errorf("cannot open file: %w", err)
+	}
+	defer f.Close()
+
+	return CopyFromReaderToFile(dst, f)
+}
