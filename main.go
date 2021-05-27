@@ -513,8 +513,10 @@ func run(args []string) (err error) {
 		return nil
 	})
 
-	if err := internal_ioutil.CopyFile(filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"), options.KernelEfi); err != nil {
-		return xerrors.Errorf("cannot install kernel: %w", err)
+	if options.KernelEfi != "" {
+		if err := internal_ioutil.CopyFile(filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"), options.KernelEfi); err != nil {
+			return xerrors.Errorf("cannot install kernel: %w", err)
+		}
 	}
 
 	efiEnv, err := newEFIEnvironment(&options)
