@@ -514,7 +514,11 @@ func run(args []string) (err error) {
 	})
 
 	if options.KernelEfi != "" {
-		if err := internal_ioutil.CopyFile(filepath.Join(espPath, "EFI/ubuntu/grubx64.efi"), options.KernelEfi); err != nil {
+		dst := filepath.Join(espPath, "EFI/ubuntu/grubx64.efi")
+		if err := os.Remove(dst); err != nil {
+			return xerrors.Errorf("cannot remove grub: %w", err)
+		}
+		if err := internal_ioutil.CopyFile(dst, options.KernelEfi); err != nil {
 			return xerrors.Errorf("cannot install kernel: %w", err)
 		}
 	}
