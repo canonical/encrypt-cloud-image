@@ -70,6 +70,7 @@ type Options struct {
 
 	AddEFIBootManagerProfile bool `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
 	AddEFISecureBootProfile  bool `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
+	AddUbuntuKernelProfile bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12)"`
 
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 
@@ -150,7 +151,13 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 		}
 	}
 
-	pcrProfile.AddPCRValue(tpm2.HashAlgorithmSHA256, 12, make([]byte, tpm2.HashAlgorithmSHA256.Size()))
+	if options.AddUbuntuKernelProfile {
+		pcrProfile.AddPCRValue(tpm2.HashAlgorithmSHA256, 12, make([]byte, tpm2.HashAlgorithmSHA256.Size()))
+
+		// Note, kernel EFI stub only measures a commandline if one is supplied
+		// TODO: Add kernel commandline
+		// TODO: Add snap model
+	}
 
 	log.Debugln("PCR profile:", pcrProfile)
 	pcrs, digests, err := pcrProfile.ComputePCRDigests(nil, tpm2.HashAlgorithmSHA256)
