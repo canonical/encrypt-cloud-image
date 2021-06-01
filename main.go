@@ -70,11 +70,13 @@ type Options struct {
 
 	AddEFIBootManagerProfile bool `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
 	AddEFISecureBootProfile  bool `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
-	AddUbuntuKernelProfile bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
+	AddUbuntuKernelProfile   bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
 
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 
-	SRKPub string `long:"srk-pub" description:"Path to SRK public area"`
+	SRKPub                string `long:"srk-pub" description:"Path to SRK public area"`
+	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
+	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 }
@@ -98,7 +100,79 @@ func (l *functionList) run() (err error) {
 	return err
 }
 
+func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
+	log.Debugln("reading unique data from", path)
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, xerrors.Errorf("cannot open file: %w", err)
+	}
+
+	switch alg {
+	case tpm2.ObjectTypeRSA:
+		var rsa tpm2.PublicKeyRSA
+		if _, err := mu.UnmarshalFromReader(f, &rsa); err != nil {
+			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
+		}
+		return &tpm2.PublicIDU{RSA: rsa}, nil
+	case tpm2.ObjectTypeECC:
+		var ecc *tpm2.ECCPoint
+		if _, err := mu.UnmarshalFromReader(f, &ecc); err != nil {
+			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
+		}
+		return &tpm2.PublicIDU{ECC: ecc}, nil
+	}
+
+	return nil, errors.New("unsupported type")
+}
+
+func writeCustomSRKTemplate(srkPub *tpm2.Public, path string, options *Options) error {
+	if options.StandardSRKTemplate {
+		return nil
+	}
+
+	log.Debugln("writing custom SRK template to", path)
+
+	b, err := mu.MarshalToBytes(srkPub)
+	if err != nil {
+		return xerrors.Errorf("cannot marshal SRKpub: %w", err)
+	}
+
+	var srkTmpl *tpm2.Public
+	if _, err := mu.UnmarshalFromBytes(b, &srkTmpl); err != nil {
+		return xerrors.Errorf("cannot unmarshal SRK template: %w", err)
+	}
+	srkTmpl.Unique = nil
+
+	if options.SRKTemplateUniqueData != "" {
+		u, err := readUniqueData(options.SRKTemplateUniqueData, srkTmpl.Type)
+		if err != nil {
+			return xerrors.Errorf("cannot read unique data: %w", err)
+		}
+		srkTmpl.Unique = u
+	}
+
+	b, err = mu.MarshalToBytes(srkTmpl)
+	if err != nil {
+		return xerrors.Errorf("cannot marshal SRK template: %w", err)
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return xerrors.Errorf("cannot open file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := mu.MarshalToWriter(f, b); err != nil {
+		return xerrors.Errorf("cannot write SRK template to file: %w", err)
+	}
+
+	return nil
+}
+
 func readPublicArea(path string) (*tpm2.Public, error) {
+	log.Debugln("reading public area from", path)
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -381,6 +455,10 @@ func checkPrerequisites(options *Options) error {
 		return errors.New("missing --srk-pub option")
 	}
 
+	if options.StandardSRKTemplate && options.SRKTemplateUniqueData != "" {
+		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
+	}
+
 	if !nbd.IsSupported() {
 		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
 	}
@@ -555,6 +633,10 @@ func run(args []string) (err error) {
 		PCRPolicyCounterHandle: tpm2.HandleNull}
 	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
+	}
+
+	if err := writeCustomSRKTemplate(srkPub, filepath.Join(espPath, "tpm2-srk.tmpl"), &options); err != nil {
+		return xerrors.Errorf("cannot write custom SRK template: %w", err)
 	}
 
 	return nil
