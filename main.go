@@ -127,10 +127,6 @@ func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error)
 }
 
 func writeCustomSRKTemplate(srkPub *tpm2.Public, path string, options *Options) error {
-	if options.StandardSRKTemplate {
-		return nil
-	}
-
 	log.Debugln("writing custom SRK template to", path)
 
 	b, err := mu.MarshalToBytes(srkPub)
@@ -635,8 +631,10 @@ func run(args []string) (err error) {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
 	}
 
-	if err := writeCustomSRKTemplate(srkPub, filepath.Join(espPath, "tpm2-srk.tmpl"), &options); err != nil {
-		return xerrors.Errorf("cannot write custom SRK template: %w", err)
+	if !options.StandardSRKTemplate {
+		if err := writeCustomSRKTemplate(srkPub, filepath.Join(espPath, "tpm2-srk.tmpl"), &options); err != nil {
+			return xerrors.Errorf("cannot write custom SRK template: %w", err)
+		}
 	}
 
 	return nil
