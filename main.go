@@ -196,6 +196,12 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 		{
 			Source: secboot_efi.Firmware,
 			Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
+			Next: []*secboot_efi.ImageLoadEvent{
+				{
+					Source: secboot_efi.Shim,
+					Image: secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
+				},
+			},
 		},
 	}
 
