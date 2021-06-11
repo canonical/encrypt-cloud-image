@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	log "github.com/sirupsen/logrus"
@@ -166,7 +167,7 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
 	defer func() {
 		c.logger.Debugln("killing udevadm monitor")
 		if err := udevadmCmd.Process.Kill(); err != nil {
-			c.logger.Errorln("cannot kill udevadm monitor:", err, "- will likely hang from here")
+			panic(xerrors.Errorf("cannot kill udevadm monitor: %w", err))
 		}
 		udevadmCmd.Wait()
 
@@ -185,7 +186,7 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
 			c.logger.Debugln("encountered an error so making sure qemu-nbd is killed")
 			p, _ := os.FindProcess(pid)
 			if err := p.Kill(); err != nil {
-				c.logger.Errorln("cannot kill qemu-nbd:", err)
+				panic(xerrors.Errorf("cannot kill qemu-nbd: %w", err))
 			}
 		}
 	}()
@@ -281,7 +282,7 @@ func (c *Connection) Disconnect() error {
 	return nil
 }
 
-func ConnectImage(path string) (*Connection, error) {
+func ConnectImage(path string) (conn *Connection, err error) {
 	log.Debugln("connecting", path, "to NBD device")
 	if !IsModuleLoaded() {
 		return nil, ErrKernelModuleNotLoaded
@@ -290,6 +291,19 @@ func ConnectImage(path string) (*Connection, error) {
 	c := &Connection{sourcePath: path, qemuNbdDone: make(chan error)}
 	c.logger = log.WithField("nbd.Connection", fmt.Sprintf("%p", c))
 	c.logger.Debugln("created Connection for", path)
+
+	defer func() {
+		if v := recover(); v != nil {
+			if e, ok := v.(error); ok {
+				var s syscall.Errno
+				if xerrors.As(e, &s) {
+					err = e
+					return
+				}
+			}
+			panic(v)
+		}
+	}()
 
 	if err := c.connect(path); err != nil {
 		return nil, err

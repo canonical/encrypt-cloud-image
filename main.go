@@ -81,23 +81,16 @@ type Options struct {
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 }
 
-type functionList struct {
-	fns []func() error
+type cleanupError struct {
+	err error
 }
 
-func (l *functionList) add(fn func() error) {
-	l.fns = append(l.fns, fn)
+func (e *cleanupError) Error() string {
+	return e.err.Error()
 }
 
-func (l *functionList) run() (err error) {
-	for len(l.fns) > 0 {
-		fn := l.fns[len(l.fns)-1]
-		l.fns = l.fns[:len(l.fns)-1]
-		if e := fn(); e != nil && err == nil {
-			err = e
-		}
-	}
-	return err
+func (e *cleanupError) Unwrap() error {
+	return e.err
 }
 
 func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
@@ -199,7 +192,7 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 			Next: []*secboot_efi.ImageLoadEvent{
 				{
 					Source: secboot_efi.Shim,
-					Image: secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
+					Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
 				},
 			},
 		},
@@ -358,8 +351,8 @@ func encryptExtDevice(path string) (k []byte, err error) {
 		return nil, xerrors.Errorf("cannot activate LUKS container: %w", err)
 	}
 	defer func() {
-		if e := luks2.Deactivate(volumeName); e != nil && err == nil {
-			err = xerrors.Errorf("cannot detach container: %w", err)
+		if err := luks2.Deactivate(volumeName); err != nil {
+			panic(&cleanupError{xerrors.Errorf("cannot detach container: %w", err)})
 		}
 	}()
 	path = filepath.Join("/dev/mapper", volumeName)
@@ -515,16 +508,6 @@ func run(args []string) (err error) {
 
 	log.Debugln("args:", strings.Join(args, " "))
 
-	var deferred functionList
-	defer func() {
-		if e := deferred.run(); e != nil {
-			log.Error(e)
-			if err == nil {
-				err = errors.New("errors were encountered when cleaning up")
-			}
-		}
-	}()
-
 	if err := checkPrerequisites(&options); err != nil {
 		return err
 	}
@@ -533,30 +516,30 @@ func run(args []string) (err error) {
 	if err != nil {
 		return xerrors.Errorf("cannot create working directory: %w", err)
 	}
-	deferred.add(func() error {
+	defer func() {
 		if err := os.RemoveAll(workingDir); err != nil {
-			return xerrors.Errorf("cannot remove working directory: %w", err)
+			panic(&cleanupError{xerrors.Errorf("cannot remove working directory: %w", err)})
 		}
-		return nil
-	})
+	}()
 	log.Debugln("temporary working directory:", workingDir)
 
 	nbdConn, err := connectImage(workingDir, &options)
 	if err != nil {
 		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
 	}
-	deferred.add(func() error {
+	defer func() {
+		if err != nil {
+			return
+		}
 		if err := os.Rename(nbdConn.SourcePath(), options.Output); err != nil {
-			return xerrors.Errorf("cannot move working image to final path: %w", err)
+			panic(&cleanupError{xerrors.Errorf("cannot move working image to final path: %w", err)})
 		}
-		return nil
-	})
-	deferred.add(func() error {
+	}()
+	defer func() {
 		if err := nbdConn.Disconnect(); err != nil {
-			return xerrors.Errorf("cannot disconnect from %s: %w", nbdConn.DevPath(), err)
+			panic(&cleanupError{xerrors.Errorf("cannot disconnect from %s: %w", nbdConn.DevPath(), err)})
 		}
-		return nil
-	})
+	}()
 
 	partitions, err := gpt.ReadPartitionTable(nbdConn.DevPath())
 	if err != nil {
@@ -593,12 +576,11 @@ func run(args []string) (err error) {
 	if err := mount(espDevPath, espPath, "vfat"); err != nil {
 		return xerrors.Errorf("cannot mount %s to %s: %w", espDevPath, espPath, err)
 	}
-	deferred.add(func() error {
+	defer func() {
 		if err := unmount(espPath); err != nil {
-			return xerrors.Errorf("cannot unmount %s: %w", espPath, err)
+			panic(&cleanupError{xerrors.Errorf("cannot unmount %s: %w", espPath, err)})
 		}
-		return nil
-	})
+	}()
 
 	if options.KernelEfi != "" {
 		dst := filepath.Join(espPath, "EFI/ubuntu/grubx64.efi")
@@ -647,6 +629,18 @@ func run(args []string) (err error) {
 }
 
 func main() {
+	defer func() {
+		if v := recover(); v != nil {
+			if e, ok := v.(error); ok {
+				var c *cleanupError
+				if xerrors.As(e, &c) {
+					log.Fatal(e)
+				}
+			}
+			panic(v)
+		}
+	}()
+
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
