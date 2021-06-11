@@ -143,10 +143,12 @@ func customizeRootFS(workingDir, path string, options *Options) error {
 		return xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
 	}
 
+	log.Infoln("mounting root filesystem")
 	if err := mount(path, mountPath, "ext4"); err != nil {
 		return xerrors.Errorf("cannot mount rootfs: %w", err)
 	}
 	defer func() {
+		log.Infoln("unmounting root filesystem")
 		if err := unmount(mountPath); err != nil {
 			panic(&cleanupError{xerrors.Errorf("cannot unmount rootfs: %w", err)})
 		}
@@ -206,7 +208,7 @@ func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error)
 }
 
 func writeCustomSRKTemplate(srkPub *tpm2.Public, path string, options *Options) error {
-	log.Debugln("writing custom SRK template to", path)
+	log.Infoln("writing custom SRK template to", path)
 
 	b, err := mu.MarshalToBytes(srkPub)
 	if err != nil {
@@ -246,8 +248,6 @@ func writeCustomSRKTemplate(srkPub *tpm2.Public, path string, options *Options) 
 }
 
 func readPublicArea(path string) (*tpm2.Public, error) {
-	log.Debugln("reading public area from", path)
-
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func readPublicArea(path string) (*tpm2.Public, error) {
 }
 
 func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.HostEnvironment) (*secboot.PCRProtectionProfile, error) {
-	log.Debugln("computing PCR protection profile")
+	log.Infoln("computing PCR protection profile")
 	pcrProfile := secboot.NewPCRProtectionProfile()
 
 	loadSequences := []*secboot_efi.ImageLoadEvent{
@@ -319,8 +319,8 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 	if err != nil {
 		return nil, xerrors.Errorf("cannot compute PCR digests: %w", err)
 	}
-	log.Debugln("PCR selection:", pcrs)
-	log.Debugln("PCR digests:")
+	log.Infoln("PCR selection:", pcrs)
+	log.Infoln("PCR digests:")
 	for _, digest := range digests {
 		log.Debugf(" %x\n", digest)
 	}
@@ -363,7 +363,6 @@ func validImageExt(ext string) bool {
 }
 
 func mount(dev, path, fs string) error {
-	log.Infoln("mounting", dev, "to", path)
 	cmd := exec.LoggedCommand("mount", "-t", fs, dev, path)
 	return cmd.Run()
 }
@@ -437,6 +436,7 @@ func encryptExtDevice(path string) (k []byte, err error) {
 		return nil, xerrors.Errorf("cannot activate LUKS container: %w", err)
 	}
 	defer func() {
+		log.Infoln("detaching", volumeName)
 		if err := luks2.Deactivate(volumeName); err != nil {
 			panic(&cleanupError{xerrors.Errorf("cannot detach container: %w", err)})
 		}
@@ -607,7 +607,7 @@ func run(args []string) (err error) {
 			panic(&cleanupError{xerrors.Errorf("cannot remove working directory: %w", err)})
 		}
 	}()
-	log.Debugln("temporary working directory:", workingDir)
+	log.Infoln("temporary working directory:", workingDir)
 
 	nbdConn, err := connectImage(workingDir, &options)
 	if err != nil {
@@ -622,6 +622,7 @@ func run(args []string) (err error) {
 		}
 	}()
 	defer func() {
+		log.Infoln("disconnecting", nbdConn.DevPath())
 		if err := nbdConn.Disconnect(); err != nil {
 			panic(&cleanupError{xerrors.Errorf("cannot disconnect from %s: %w", nbdConn.DevPath(), err)})
 		}
@@ -669,10 +670,12 @@ func run(args []string) (err error) {
 	if err := os.Mkdir(espPath, 0700); err != nil {
 		return xerrors.Errorf("cannot create directory to mount ESP: %w", err)
 	}
+	log.Infoln("mounting ESP")
 	if err := mount(espDevPath, espPath, "vfat"); err != nil {
 		return xerrors.Errorf("cannot mount %s to %s: %w", espDevPath, espPath, err)
 	}
 	defer func() {
+		log.Infoln("unmounting ESP")
 		if err := unmount(espPath); err != nil {
 			panic(&cleanupError{xerrors.Errorf("cannot unmount %s: %w", espPath, err)})
 		}
@@ -706,8 +709,9 @@ func run(args []string) (err error) {
 	if err != nil {
 		return xerrors.Errorf("cannot compute name of SRK: %w", err)
 	}
-	log.Infof("Supplied SRK name: %x\n", srkName)
+	log.Infof("supplied SRK name: %x\n", srkName)
 
+	log.Infoln("creating importable sealed key object")
 	params := secboot.KeyCreationParams{
 		PCRProfile:             pcrProfile,
 		PCRPolicyCounterHandle: tpm2.HandleNull}
