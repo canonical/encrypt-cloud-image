@@ -79,6 +79,8 @@ type Options struct {
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
+
+	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
 }
 
 type cleanupError struct {
@@ -91,6 +93,40 @@ func (e *cleanupError) Error() string {
 
 func (e *cleanupError) Unwrap() error {
 	return e.err
+}
+
+func customizeRootFS(workingDir, path string, options *Options) error {
+	if options.OverrideDatasources == "" {
+		return nil
+	}
+
+	log.Infoln("applying customizations to image")
+
+	mountPath := filepath.Join(workingDir, "rootfs")
+
+	if err := os.Mkdir(mountPath, 0700); err != nil {
+		return xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
+	}
+
+	if err := mount(path, mountPath, "ext4"); err != nil {
+		return xerrors.Errorf("cannot mount rootfs: %w", err)
+	}
+	defer func() {
+		if err := unmount(mountPath); err != nil {
+			panic(&cleanupError{xerrors.Errorf("cannot unmount rootfs: %w", err)})
+		}
+	}()
+
+	datasourceOverrideTmpl := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
+datasource_list: [ %s ]
+`
+	datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, options.OverrideDatasources)
+
+	if err := ioutil.WriteFile(filepath.Join(mountPath, "etc/cloud/cloud.cfg.d", "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
+		return xerrors.Errorf("cannot create datasource override file: %w", err)
+	}
+
+	return nil
 }
 
 func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
@@ -555,6 +591,10 @@ func run(args []string) (err error) {
 	log.Debugln("rootfs partition on", nbdConn.DevPath(), ":", root)
 	rootDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), root.Index)
 	log.Infoln("device node for rootfs partition:", rootDevPath)
+
+	if err := customizeRootFS(workingDir, rootDevPath, &options); err != nil {
+		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
+	}
 
 	key, err := encryptExtDevice(rootDevPath)
 	if err != nil {
