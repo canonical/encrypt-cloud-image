@@ -30,6 +30,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/canonical/go-efilib"
@@ -81,6 +82,7 @@ type Options struct {
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 
 	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
+	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 }
 
 type cleanupError struct {
@@ -95,8 +97,41 @@ func (e *cleanupError) Unwrap() error {
 	return e.err
 }
 
+func getBlockDeviceSize(path string) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	return f.Seek(0, io.SeekEnd)
+}
+
+func growPartition(diskDevPath, partDevPath string, partNum int) error {
+	log.Infoln("growing encrypted partition")
+
+	sz, err := getBlockDeviceSize(partDevPath)
+	if err != nil {
+		return xerrors.Errorf("cannot determine current partition size: %w", err)
+	}
+	log.Debugln("current size:", sz)
+
+	cmd := exec.LoggedCommand("growpart", diskDevPath, strconv.Itoa(partNum))
+	if err := cmd.Run(); err != nil {
+		return xerrors.Errorf("cannot grow partition: %w", err)
+	}
+
+	sz, err = getBlockDeviceSize(partDevPath)
+	if err != nil {
+		return xerrors.Errorf("cannot determine new partition size: %w", err)
+	}
+	log.Debugln("new size:", sz)
+
+	return nil
+}
+
 func customizeRootFS(workingDir, path string, options *Options) error {
-	if options.OverrideDatasources == "" {
+	if options.OverrideDatasources == "" && !options.GrowRoot {
 		return nil
 	}
 
@@ -117,13 +152,28 @@ func customizeRootFS(workingDir, path string, options *Options) error {
 		}
 	}()
 
-	datasourceOverrideTmpl := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
+	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
+
+	if options.OverrideDatasources != "" {
+		datasourceOverrideTmpl := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
 datasource_list: [ %s ]
 `
-	datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, options.OverrideDatasources)
+		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, options.OverrideDatasources)
 
-	if err := ioutil.WriteFile(filepath.Join(mountPath, "etc/cloud/cloud.cfg.d", "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
-		return xerrors.Errorf("cannot create datasource override file: %w", err)
+		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
+			return xerrors.Errorf("cannot create datasource override file: %w", err)
+		}
+	}
+
+	if options.GrowRoot {
+		disableGrowPart := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
+growpart:
+    mode: off
+`
+
+		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
+			return xerrors.Errorf("cannot create growpart override file: %w", err)
+		}
 	}
 
 	return nil
@@ -599,6 +649,12 @@ func run(args []string) (err error) {
 	key, err := encryptExtDevice(rootDevPath)
 	if err != nil {
 		return xerrors.Errorf("cannot encrypt %s: %w", rootDevPath, err)
+	}
+
+	if options.GrowRoot {
+		if err := growPartition(nbdConn.DevPath(), rootDevPath, root.Index); err != nil {
+			return xerrors.Errorf("cannot grow root partition: %w", err)
+		}
 	}
 
 	esp := partitions.FindByPartitionType(espGUID)
