@@ -727,7 +727,7 @@ func run(args []string) (err error) {
 	params := secboot.KeyCreationParams{
 		PCRProfile:             pcrProfile,
 		PCRPolicyCounterHandle: tpm2.HandleNull}
-	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "cloudimg-rootfs.sealed-key"), &params); err != nil {
+	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "device/fde", "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
 	}
 
