@@ -723,11 +723,16 @@ func run(args []string) (err error) {
 	}
 	log.Infof("supplied SRK name: %x\n", srkName)
 
+	keyDir := filepath.Join(espPath, "device/fde")
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		return xerrors.Errorf("cannot create directory to store sealed disk unlock key: %w", err)
+	}
+
 	log.Infoln("creating importable sealed key object")
 	params := secboot.KeyCreationParams{
 		PCRProfile:             pcrProfile,
 		PCRPolicyCounterHandle: tpm2.HandleNull}
-	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(espPath, "device/fde", "cloudimg-rootfs.sealed-key"), &params); err != nil {
+	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(keyDir, "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
 	}
 
