@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/go-tpm2"
@@ -121,6 +122,9 @@ func growPartition(diskDevPath, partDevPath string, partNum int) error {
 		return xerrors.Errorf("cannot grow partition: %w", err)
 	}
 
+	// XXX: This is a bit of a hack to avoid a race whilst the kernel
+	// re-reads the partition table.
+	time.Sleep(2 * time.Second)
 	sz, err = getBlockDeviceSize(partDevPath)
 	if err != nil {
 		return xerrors.Errorf("cannot determine new partition size: %w", err)
@@ -372,7 +376,7 @@ func unmount(path string) error {
 	return cmd.Run()
 }
 
-func encrypt(path string, key []byte) error {
+func luks2Encrypt(path string, key []byte) error {
 	cmd := exec.LoggedCommand("cryptsetup",
 		// verbose
 		"-v",
@@ -386,8 +390,6 @@ func encrypt(path string, key []byte) error {
 		"--key-file", "-",
 		// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
 		"--cipher", "aes-xts-plain64", "--key-size", "512",
-		//// set LUKS2 label
-		//"--label", label,
 		// use argon2i as the KDF
 		"--pbkdf", "argon2i",
 		// set the KDF benchmark time
@@ -401,6 +403,11 @@ func encrypt(path string, key []byte) error {
 		path)
 	cmd.Stdin = bytes.NewReader(key)
 
+	return cmd.Run()
+}
+
+func luks2SetLabel(path, label string) error {
+	cmd := exec.LoggedCommand("cryptsetup", "-v", "config", "--label", label, path)
 	return cmd.Run()
 }
 
@@ -426,8 +433,13 @@ func encryptExtDevice(path string) (k []byte, err error) {
 	}
 
 	log.Infoln("encrypting", path)
-	if err := encrypt(path, key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot encrypt: %w", path, err)
+	if err := luks2Encrypt(path, key[:]); err != nil {
+		return nil, xerrors.Errorf("cannot encrypt %s: %w", path, err)
+	}
+
+	log.Infoln("setting label")
+	if err := luks2SetLabel(path, "cloudimg-rootfs-enc"); err != nil {
+		return nil, xerrors.Errorf("cannot set label: %w", err)
 	}
 
 	volumeName := filepath.Base(path)
