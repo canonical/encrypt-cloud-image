@@ -414,7 +414,10 @@ func (c *Connection) Disconnect() error {
 func ConnectImage(path string) (conn *Connection, err error) {
 	log.Debugln("connecting", path, "to NBD device")
 	if !IsModuleLoaded() {
-		return nil, ErrKernelModuleNotLoaded
+		return nil, errors.New("nbd kernel module is not loaded")
+	}
+	if !IsSupported() {
+		return nil, errors.New("not supported: is qemu-nbd installed?")
 	}
 
 	c := &Connection{sourcePath: path, imageType: getImageTypeHint(path), qemuNbdDone: make(chan error)}

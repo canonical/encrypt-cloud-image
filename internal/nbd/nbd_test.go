@@ -205,7 +205,7 @@ var _ = Suite(&nbdSuite{})
 
 func (s *nbdSuite) TestConnectNoNBD(c *C) {
 	_, err := ConnectImage("/path/to/image")
-	c.Check(err, Equals, ErrKernelModuleNotLoaded)
+	c.Check(err, ErrorMatches, "nbd kernel module is not loaded")
 }
 
 type simulatedUevent struct {
