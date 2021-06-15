@@ -22,7 +22,9 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -317,6 +319,11 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 		// Note, kernel EFI stub only measures a commandline if one is supplied
 		// TODO: Add kernel commandline
 		// TODO: Add snap model
+
+		// snap-bootstrap measures an epoch
+		h := crypto.SHA256.New()
+		binary.Write(h, binary.LittleEndian, uint32(0))
+		pcrProfile.ExtendPCR(tpm2.HashAlgorithmSHA256, 12, h.Sum(nil))
 	}
 
 	log.Debugln("PCR profile:", pcrProfile)
