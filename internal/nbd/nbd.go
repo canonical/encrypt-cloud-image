@@ -186,7 +186,10 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 			c.logger.Debugln("encountered an error so making sure qemu-nbd is killed")
 			p, _ := os.FindProcess(pid)
 			if err := p.Kill(); err != nil {
-				panic(xerrors.Errorf("cannot kill qemu-nbd: %w", err))
+				var e syscall.Errno
+				if xerrors.As(err, &e) {
+					panic(xerrors.Errorf("cannot kill qemu-nbd: %w", err))
+				}
 			}
 		}
 	}()
