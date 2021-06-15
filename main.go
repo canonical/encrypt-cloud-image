@@ -65,9 +65,9 @@ var (
 )
 
 type Options struct {
-	Input string `short:"i" long:"input" description:"Input image path"`
+	Input string `short:"i" long:"input" description:"Input image path" required:"true"`
 
-	Output string `short:"o" long:"output" description:"Output image path"`
+	Output string `short:"o" long:"output" description:"Output image path" required:"true"`
 
 	Verbose bool `short:"v" long:"verbose" description:"Enable verbose debug output"`
 
@@ -77,7 +77,7 @@ type Options struct {
 
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 
-	SRKPub                string `long:"srk-pub" description:"Path to SRK public area"`
+	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
@@ -541,14 +541,6 @@ func connectImage(workingDir string, options *Options) (*nbd.Connection, error) 
 }
 
 func checkPrerequisites(options *Options) error {
-	if options.Input == "" || options.Output == "" {
-		return errors.New("missing required --input or --output option")
-	}
-
-	if options.SRKPub == "" {
-		return errors.New("missing --srk-pub option")
-	}
-
 	if options.StandardSRKTemplate && options.SRKTemplateUniqueData != "" {
 		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
 	}
