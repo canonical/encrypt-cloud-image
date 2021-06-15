@@ -85,7 +85,12 @@ func run(args []string) error {
 		return xerrors.Errorf("cannot decode config: %w", err)
 	}
 
-	profile := efienv.AzDisk{Properties: &efienv.AzDiskProperties{UefiSettings: &efienv.AzUefiSettings{Signatures: new(efienv.AzUefiSignatures)}}}
+	profile := efienv.AzDisk{
+		Type: "Microsoft.Compute/disks",
+		Properties: &efienv.AzDiskProperties{
+			UefiSettings: &efienv.AzUefiSettings{
+				SignatureMode: "Replace",
+				Signatures: new(efienv.AzUefiSignatures)}}}
 
 	r := bytes.NewReader(config.PK)
 	l, err := efi.ReadSignatureList(r)

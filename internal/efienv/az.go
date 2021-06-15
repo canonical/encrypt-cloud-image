@@ -48,6 +48,7 @@ type AzUefiSignatures struct {
 }
 
 type AzUefiSettings struct {
+	SignatureMode string `json:"signatureMode"`
 	Signatures *AzUefiSignatures `json:"signatures"`
 }
 
@@ -57,6 +58,7 @@ type AzDiskProperties struct {
 
 // XXX: Use armcompute.Disk when it has the right properties.
 type AzDisk struct {
+	Type string `json:"type"`
 	Properties *AzDiskProperties `json:"properties"`
 }
 
@@ -84,6 +86,10 @@ func decodeAzSignatureDb(azdb []*AzUefiSignatureList) (out efi.SignatureDatabase
 }
 
 func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
+	if profile.Type != "Microsoft.Compute/disks" {
+		return nil, fmt.Errorf("unexpected resource type %s", profile.Type)
+	}
+
 	config := &Config{LogAlgorithms: tcglog.AlgorithmIdList{tcglog.AlgorithmSha256}, OmitsReadyToBootEvent: false}
 
 	if profile.Properties == nil {
@@ -91,6 +97,9 @@ func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
 	}
 	if profile.Properties.UefiSettings == nil {
 		return config, nil
+	}
+	if profile.Properties.UefiSettings.SignatureMode != "Replace" {
+		return nil, fmt.Errorf("unexpected signatureMode %s", profile.Properties.UefiSettings.SignatureMode)
 	}
 	if profile.Properties.UefiSettings.Signatures == nil {
 		return config, nil

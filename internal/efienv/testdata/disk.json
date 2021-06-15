@@ -1,6 +1,8 @@
 {
+  "type": "Microsoft.Compute/disks",
   "properties": {
     "uefiSettings": {
+      "signatureMode": "Replace",
       "signatures": {
         "PK": {
           "type": "x509",
