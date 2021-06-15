@@ -573,6 +573,7 @@ func configureLogging() {
 			log.WarnLevel})
 	w.SetFormatter(&log.TextFormatter{
 		FullTimestamp:          true,
+		TimestampFormat:	time.RFC3339Nano,
 		DisableLevelTruncation: true,
 		PadLevelText:           true})
 	w.SetOutput(os.Stderr)
@@ -585,6 +586,7 @@ func configureLogging() {
 			log.TraceLevel})
 	w.SetFormatter(&log.TextFormatter{
 		FullTimestamp:          true,
+		TimestampFormat:	time.RFC3339Nano,
 		DisableLevelTruncation: true,
 		PadLevelText:           true})
 	w.SetOutput(os.Stdout)
