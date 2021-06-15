@@ -119,7 +119,7 @@ type Connection struct {
 	qemuNbdDone chan error
 }
 
-func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
+func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 	c.logger.Debugln("trying to connect to", dev)
 
 	udevadmCmd := internal_exec.LoggedCommand("udevadm", "monitor", "--kernel")
@@ -136,7 +136,7 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
 
 	qemuNbdStarted := make(chan int)
 	go func() {
-		cmd := internal_exec.LoggedCommand("qemu-nbd", "-v", "-c", dev.devPath(), path)
+		cmd := internal_exec.LoggedCommand("qemu-nbd", "-v", "-c", dev.devPath(), c.sourcePath)
 		if err := cmd.Start(); err != nil {
 			c.qemuNbdDone <- err
 			return
@@ -234,7 +234,7 @@ func (c *Connection) tryConnectToDevice(path string, dev nbdDev) (err error) {
 	}
 }
 
-func (c *Connection) connect(path string) error {
+func (c *Connection) connect() error {
 	maxDevices, err := getMaxNBDs()
 	if err != nil {
 		return xerrors.Errorf("cannot determine maximum number of NBD devices: %w", err)
@@ -244,7 +244,7 @@ func (c *Connection) connect(path string) error {
 	for i := 0; i < 100; i++ {
 		c.logger.Debugln("loop", i)
 		for j := 0; j < maxDevices; j++ {
-			err := c.tryConnectToDevice(path, nbdDev(j))
+			err := c.tryConnectToDevice(nbdDev(j))
 			switch {
 			case err == errDeviceBusy:
 				c.logger.Debugln("device", j, "is already managed by another process")
@@ -305,7 +305,7 @@ func ConnectImage(path string) (conn *Connection, err error) {
 		}
 	}()
 
-	if err := c.connect(path); err != nil {
+	if err := c.connect(); err != nil {
 		return nil, err
 	}
 
