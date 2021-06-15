@@ -20,12 +20,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"sort"
 
 	"github.com/canonical/go-efilib"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
@@ -37,16 +37,6 @@ import (
 var (
 	msOwnerGuid = efi.MakeGUID(0x77fa9abd, 0x0359, 0x4d32, 0xbd60, [...]uint8{0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b})
 )
-
-func writeSignatureDatabase(path string, db efi.SignatureDatabase) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return db.Write(f)
-}
 
 func encodeAzSignatureDb(db efi.SignatureDatabase) (out []*efienv.AzUefiSignatureList, err error) {
 	for _, l := range db {
@@ -75,103 +65,78 @@ func encodeAzSignatureDb(db efi.SignatureDatabase) (out []*efienv.AzUefiSignatur
 	return out, nil
 }
 
-func readSignatureList(path string) (*efi.SignatureList, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	return efi.ReadSignatureList(f)
-}
-
-func buildSignatureDatabase(paths []string) (efi.SignatureDatabase, error) {
-	var db efi.SignatureDatabase
-	for _, path := range paths {
-		l, err := readSignatureList(path)
-		if err != nil {
-			return nil, xerrors.Errorf("cannot read ESL for %s: %w", path, err)
-		}
-		db = append(db, l)
-	}
-	return db, nil
-}
-
 func run(args []string) error {
 	if len(args) != 2 {
-		return errors.New("usage: " + os.Args[0] + " <input_dir> <output_dir>")
+		return errors.New("usage: " + os.Args[0] + " <input_file> <output_file>")
 	}
 
 	input := args[0]
 	output := args[1]
 
+	f, err := os.Open(input)
+	if err != nil {
+		return xerrors.Errorf("cannot open file: %w", err)
+	}
+	defer f.Close()
+
+	var config efienv.Config
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&config); err != nil {
+		return xerrors.Errorf("cannot decode config: %w", err)
+	}
+
 	profile := efienv.AzDisk{Properties: &efienv.AzDiskProperties{UefiSettings: &efienv.AzUefiSettings{Signatures: new(efienv.AzUefiSignatures)}}}
 
-	var pk []*efienv.AzUefiSignatureList
-
-	path := filepath.Join(input, "PK.esl")
-	l, err := readSignatureList(path)
+	r := bytes.NewReader(config.PK)
+	l, err := efi.ReadSignatureList(r)
 	switch {
-	case err != nil && os.IsNotExist(err):
+	case err != nil && err == io.EOF:
 	case err != nil:
-		return xerrors.Errorf("cannot open file %s: %w", path, err)
+		return xerrors.Errorf("cannot read PK: %w", err)
 	default:
 		azdb, err := encodeAzSignatureDb(efi.SignatureDatabase{l})
 		if err != nil {
 			return xerrors.Errorf("cannot encode PK to az format: %w", err)
 		}
 		profile.Properties.UefiSettings.Signatures.PK = azdb[0]
-
-		if err := writeSignatureDatabase(filepath.Join(output, "PK"), efi.SignatureDatabase{l}); err != nil {
-			return xerrors.Errorf("cannot encode PK: %w", err)
-		}
 	}
 
 	for _, d := range []struct {
 		name string
+		src  []byte
 		dst  *[]*efienv.AzUefiSignatureList
 	}{
 		{
-			"PK",
-			&pk,
+			name: "KEK",
+			src:  config.KEK,
+			dst:  &profile.Properties.UefiSettings.Signatures.KEK,
 		},
 		{
-			"KEK",
-			&profile.Properties.UefiSettings.Signatures.KEK,
+			name: "db",
+			src:  config.Db,
+			dst:  &profile.Properties.UefiSettings.Signatures.Db,
 		},
 		{
-			"db",
-			&profile.Properties.UefiSettings.Signatures.Db,
-		},
-		{
-			"dbx",
-			&profile.Properties.UefiSettings.Signatures.Dbx,
+			name: "dbx",
+			src:  config.Dbx,
+			dst:  &profile.Properties.UefiSettings.Signatures.Dbx,
 		},
 	} {
-		paths, err := filepath.Glob(filepath.Join(input, d.name+"-*.esl"))
+		r := bytes.NewReader(d.src)
+		db, err := efi.ReadSignatureDatabase(r)
 		if err != nil {
-			panic(err)
-		}
-		sort.Sort(sort.StringSlice(paths))
-
-		db, err := buildSignatureDatabase(paths)
-		if err != nil {
-			return xerrors.Errorf("cannot build signature database for %s: %w", d.name, err)
+			return xerrors.Errorf("cannot read %s: %w", d.name, err)
 		}
 
 		azdb, err := encodeAzSignatureDb(db)
 		if err != nil {
-			return xerrors.Errorf("cannot encode signature database %s to az format: %w", d.name, err)
+			return xerrors.Errorf("cannot encode %s to az format: %w", d.name, err)
 		}
 
 		*d.dst = azdb
-
-		if err := writeSignatureDatabase(filepath.Join(output, d.name), db); err != nil {
-			return xerrors.Errorf("cannot encode signature database %s: %w", d.name, err)
-		}
 	}
 
-	f, err := os.OpenFile(filepath.Join(output, "disk.json"), os.O_WRONLY|os.O_CREATE, 0644)
+	f, err = os.OpenFile(output, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return xerrors.Errorf("cannot create az template file: %w", err)
 	}

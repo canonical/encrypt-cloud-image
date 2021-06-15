@@ -38,7 +38,6 @@ import (
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/go-tpm2/mu"
-	"github.com/canonical/tcglog-parser"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/gpt"
@@ -76,6 +75,7 @@ type Options struct {
 	AddUbuntuKernelProfile   bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
 
 	AzDiskProfile string `long:"az-disk-profile" description:""`
+	UefiConfig    string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
 
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
@@ -334,28 +334,46 @@ func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.H
 }
 
 func newEFIEnvironment(options *Options) (secboot_efi.HostEnvironment, error) {
-	if options.AzDiskProfile == "" {
-		return nil, nil
+	log.Infoln("creating EFI environment for guest")
+	switch {
+	case options.AzDiskProfile != "":
+		log.Debugln("creating EFI environment from supplied az disk profile")
+		f, err := os.Open(options.AzDiskProfile)
+		if err != nil {
+			return nil, xerrors.Errorf("cannot open az disk profile resource: %w", err)
+		}
+		defer f.Close()
+
+		var profile efienv.AzDisk
+		dec := json.NewDecoder(f)
+		if err := dec.Decode(&profile); err != nil {
+			return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
+		}
+
+		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile)
+		if err != nil {
+			return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
+		}
+
+		return env, nil
+	case options.UefiConfig != "":
+		log.Debugln("creating EFI environment from supplied UEFI config")
+		f, err := os.Open(options.UefiConfig)
+		if err != nil {
+			return nil, xerrors.Errorf("cannot open UEFI config: %w", err)
+		}
+		defer f.Close()
+
+		var config efienv.Config
+		dec := json.NewDecoder(f)
+		if err := dec.Decode(&config); err != nil {
+			return nil, xerrors.Errorf("cannot decode UEFI config: %w", err)
+		}
+
+		return efienv.NewEnvironment(&config), nil
 	}
 
-	f, err := os.Open(options.AzDiskProfile)
-	if err != nil {
-		return nil, xerrors.Errorf("cannot open az disk profile resource: %w", err)
-	}
-	defer f.Close()
-
-	var profile efienv.AzDisk
-	dec := json.NewDecoder(f)
-	if err := dec.Decode(&profile); err != nil {
-		return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
-	}
-
-	env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
-	if err != nil {
-		return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
-	}
-
-	return env, nil
+	return nil, nil
 }
 
 func validImageExt(ext string) bool {
@@ -543,6 +561,10 @@ func connectImage(workingDir string, options *Options) (*nbd.Connection, error) 
 func checkPrerequisites(options *Options) error {
 	if options.StandardSRKTemplate && options.SRKTemplateUniqueData != "" {
 		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
+	}
+
+	if options.AzDiskProfile != "" && options.UefiConfig != "" {
+		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
 	}
 
 	if !nbd.IsSupported() {

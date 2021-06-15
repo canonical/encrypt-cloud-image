@@ -1,1 +1,3 @@
+create-uefi-config/create-uefi-config
 encrypt-cloud-image
+internal/efienv/create-test-az-model/create-test-az-model

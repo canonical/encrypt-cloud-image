@@ -83,17 +83,17 @@ func decodeAzSignatureDb(azdb []*AzUefiSignatureList) (out efi.SignatureDatabase
 	return out, nil
 }
 
-func NewEnvironmentFromAzDiskProfile(profile *AzDisk, logAlgs tcglog.AlgorithmIdList) (secboot_efi.HostEnvironment, error) {
-	e := &env{logReadyToBootEvent: true, logAlgorithms: logAlgs}
+func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
+	config := &Config{LogAlgorithms: tcglog.AlgorithmIdList{tcglog.AlgorithmSha256}, OmitsReadyToBootEvent: false}
 
 	if profile.Properties == nil {
-		return e, nil
+		return config, nil
 	}
 	if profile.Properties.UefiSettings == nil {
-		return e, nil
+		return config, nil
 	}
 	if profile.Properties.UefiSettings.Signatures == nil {
-		return e, nil
+		return config, nil
 	}
 
 	signatures := profile.Properties.UefiSettings.Signatures
@@ -111,22 +111,22 @@ func NewEnvironmentFromAzDiskProfile(profile *AzDisk, logAlgs tcglog.AlgorithmId
 		{
 			"PK",
 			pk,
-			&e.pk,
+			&config.PK,
 		},
 		{
 			"KEK",
 			signatures.KEK,
-			&e.kek,
+			&config.KEK,
 		},
 		{
 			"db",
 			signatures.Db,
-			&e.db,
+			&config.Db,
 		},
 		{
 			"dbx",
 			signatures.Dbx,
-			&e.dbx,
+			&config.Dbx,
 		},
 	} {
 		decoded, err := decodeAzSignatureDb(db.src)
@@ -142,5 +142,14 @@ func NewEnvironmentFromAzDiskProfile(profile *AzDisk, logAlgs tcglog.AlgorithmId
 		*db.dst = encoded.Bytes()
 	}
 
-	return e, nil
+	return config, nil
+}
+
+func NewEnvironmentFromAzDiskProfile(profile *AzDisk) (secboot_efi.HostEnvironment, error) {
+	config, err := newConfigFromAzDiskProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewEnvironment(config), nil
 }

@@ -45,7 +45,7 @@ func (s *azSuite) TestNewEnvironmentFromAzDiskProfile(c *C) {
 	c.Check(dec.Decode(&profile), IsNil)
 	c.Check(f.Close(), IsNil)
 
-	env, err := NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
+	env, err := NewEnvironmentFromAzDiskProfile(&profile)
 	c.Assert(err, IsNil)
 
 	for _, v := range []struct {

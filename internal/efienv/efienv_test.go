@@ -21,11 +21,16 @@ package efienv_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
+	. "github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 
 	. "gopkg.in/check.v1"
 )
@@ -179,4 +184,104 @@ func (checker *isEFIActionEventChecker) Check(params []interface{}, names []stri
 	}
 
 	return true, ""
+}
+
+type efienvSuite struct{}
+
+var _ = Suite(&efienvSuite{})
+
+type testNewEnvironmentData struct {
+	path                  string
+	logAlgs               tcglog.AlgorithmIdList
+	omitsReadyToBootEvent bool
+}
+
+func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
+	f, err := os.Open(data.path)
+	c.Assert(err, IsNil)
+
+	var config Config
+	dec := json.NewDecoder(f)
+	c.Check(dec.Decode(&config), IsNil)
+	c.Check(f.Close(), IsNil)
+
+	env := NewEnvironment(&config)
+
+	for _, v := range []struct {
+		guid efi.GUID
+		name string
+	}{
+		{
+			efi.GlobalVariable,
+			"PK",
+		},
+		{
+			efi.GlobalVariable,
+			"KEK",
+		},
+		{
+			efi.ImageSecurityDatabaseGuid,
+			"db",
+		},
+		{
+			efi.ImageSecurityDatabaseGuid,
+			"dbx",
+		},
+	} {
+		data, attrs, err := env.ReadVar(v.name, v.guid)
+		c.Check(err, IsNil)
+		c.Check(attrs, Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
+
+		expected, err := ioutil.ReadFile(filepath.Join("testdata", v.name))
+		c.Check(err, IsNil)
+		c.Check(data, DeepEquals, expected)
+	}
+
+	log, err := env.ReadEventLog()
+	c.Assert(err, IsNil)
+	c.Check(log.Spec, Equals, tcglog.SpecEFI_2)
+	c.Check(log.Algorithms, DeepEquals, data.logAlgs)
+
+	totalEvents := 8
+	if data.omitsReadyToBootEvent {
+		totalEvents -= 1
+	}
+
+	c.Assert(log.Events, HasLen, totalEvents)
+	c.Check(log.Events[0], isEFIVariableDriverConfigEvent, 7, "SecureBoot", efi.GlobalVariable, []byte{0x01})
+	c.Check(log.Events[1], isEFIVariableDriverConfigEvent, 7, "PK", efi.GlobalVariable, []byte(nil))
+	c.Check(log.Events[2], isEFIVariableDriverConfigEvent, 7, "KEK", efi.GlobalVariable, []byte(nil))
+	c.Check(log.Events[3], isEFIVariableDriverConfigEvent, 7, "db", efi.ImageSecurityDatabaseGuid, []byte(nil))
+	c.Check(log.Events[4], isEFIVariableDriverConfigEvent, 7, "dbx", efi.ImageSecurityDatabaseGuid, []byte(nil))
+	c.Check(log.Events[5], isSeparatorEvent, 7, tcglog.SeparatorEventNormalValue)
+	if !data.omitsReadyToBootEvent {
+		c.Check(log.Events[6], isEFIActionEvent, 4, tcglog.EFICallingEFIApplicationEvent)
+		c.Check(log.Events[7], isSeparatorEvent, 4, tcglog.SeparatorEventNormalValue)
+	} else {
+		c.Check(log.Events[6], isSeparatorEvent, 4, tcglog.SeparatorEventNormalValue)
+	}
+}
+
+func (s *efienvSuite) TestNewEnvironment1(c *C) {
+	s.testNewEnvironment(c, &testNewEnvironmentData{
+		path:                  "testdata/uefi.json",
+		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha256},
+		omitsReadyToBootEvent: false,
+	})
+}
+
+func (s *efienvSuite) TestNewEnvironment2(c *C) {
+	s.testNewEnvironment(c, &testNewEnvironmentData{
+		path:                  "testdata/uefi-omits-rtb-event.json",
+		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha256},
+		omitsReadyToBootEvent: true,
+	})
+}
+
+func (s *efienvSuite) TestNewEnvironment3(c *C) {
+	s.testNewEnvironment(c, &testNewEnvironmentData{
+		path:                  "testdata/uefi-more-algs.json",
+		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha1, tcglog.AlgorithmSha256},
+		omitsReadyToBootEvent: false,
+	})
 }
