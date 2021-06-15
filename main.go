@@ -29,6 +29,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,7 +40,7 @@ import (
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
+	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/gpt"
 	internal_ioutil "github.com/chrisccoulson/encrypt-cloud-image/internal/ioutil"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
@@ -117,7 +118,7 @@ func growPartition(diskDevPath, partDevPath string, partNum int) error {
 	}
 	log.Debugln("current size:", sz)
 
-	cmd := exec.LoggedCommand("growpart", diskDevPath, strconv.Itoa(partNum))
+	cmd := internal_exec.LoggedCommand("growpart", diskDevPath, strconv.Itoa(partNum))
 	if err := cmd.Run(); err != nil {
 		return xerrors.Errorf("cannot grow partition: %w", err)
 	}
@@ -367,17 +368,17 @@ func validImageExt(ext string) bool {
 }
 
 func mount(dev, path, fs string) error {
-	cmd := exec.LoggedCommand("mount", "-t", fs, dev, path)
+	cmd := internal_exec.LoggedCommand("mount", "-t", fs, dev, path)
 	return cmd.Run()
 }
 
 func unmount(path string) error {
-	cmd := exec.LoggedCommand("umount", path)
+	cmd := internal_exec.LoggedCommand("umount", path)
 	return cmd.Run()
 }
 
 func luks2Encrypt(path string, key []byte) error {
-	cmd := exec.LoggedCommand("cryptsetup",
+	cmd := internal_exec.LoggedCommand("cryptsetup",
 		// verbose
 		"-v",
 		// batch processing, no password verification for formatting an existing LUKS container
@@ -407,17 +408,17 @@ func luks2Encrypt(path string, key []byte) error {
 }
 
 func luks2SetLabel(path, label string) error {
-	cmd := exec.LoggedCommand("cryptsetup", "-v", "config", "--label", label, path)
+	cmd := internal_exec.LoggedCommand("cryptsetup", "-v", "config", "--label", label, path)
 	return cmd.Run()
 }
 
 func growExtFS(path string) error {
-	cmd := exec.LoggedCommand("resize2fs", "-f", "-d", "30", path)
+	cmd := internal_exec.LoggedCommand("resize2fs", "-f", "-d", "30", path)
 	return cmd.Run()
 }
 
 func shrinkExtFS(path string) error {
-	cmd := exec.LoggedCommand("resize2fs", "-fM", "-d", "62", path)
+	cmd := internal_exec.LoggedCommand("resize2fs", "-fM", "-d", "62", path)
 	return cmd.Run()
 }
 
@@ -559,6 +560,20 @@ func checkPrerequisites(options *Options) error {
 		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
 	}
 
+	for _, p := range []string{"cryptsetup", "resize2fs", "mount", "umount"} {
+		_, err := exec.LookPath(p)
+		if err != nil {
+			return fmt.Errorf("cannot continue: is %s installed?", p)
+		}
+	}
+
+	if options.GrowRoot {
+		_, err := exec.LookPath("growpart")
+		if err != nil {
+			return errors.New("cannot grow the root partition (is growpart installed?)")
+		}
+	}
+
 	return nil
 }
 
@@ -573,7 +588,7 @@ func configureLogging() {
 			log.WarnLevel})
 	w.SetFormatter(&log.TextFormatter{
 		FullTimestamp:          true,
-		TimestampFormat:	time.RFC3339Nano,
+		TimestampFormat:        time.RFC3339Nano,
 		DisableLevelTruncation: true,
 		PadLevelText:           true})
 	w.SetOutput(os.Stderr)
@@ -586,7 +601,7 @@ func configureLogging() {
 			log.TraceLevel})
 	w.SetFormatter(&log.TextFormatter{
 		FullTimestamp:          true,
-		TimestampFormat:	time.RFC3339Nano,
+		TimestampFormat:        time.RFC3339Nano,
 		DisableLevelTruncation: true,
 		PadLevelText:           true})
 	w.SetOutput(os.Stdout)
