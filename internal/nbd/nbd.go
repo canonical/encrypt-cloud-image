@@ -21,8 +21,10 @@ package nbd
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -50,12 +52,126 @@ var (
 	sysfsPath = "/sys"
 )
 
+type imageType int
+
+const (
+	imageTypeAutodetect imageType = iota
+	imageTypeFixedVHD
+	imageTypeRaw
+)
+
 func getMaxNBDs() (int, error) {
 	b, err := ioutil.ReadFile(filepath.Join(sysfsPath, "module/nbd/parameters/nbds_max"))
 	if err != nil {
 		return 0, err
 	}
 	return strconv.Atoi(strings.TrimSpace(string(b)))
+}
+
+type vhdFooter struct {
+	Cookie         [8]byte
+	Features       uint32
+	Version        uint32
+	DataOffset     uint64
+	Timestamp      uint32
+	CreatorApp     uint32
+	CreatorVersion uint32
+	CreatorOS      uint32
+	OrigSize       uint64
+	CurrentSize    uint64
+	DiskGeometry   uint32
+	Type           uint32
+	Checksum       uint32
+	UUID           [16]byte
+	InSavedState   uint8
+	Reserved       [427]byte
+}
+
+// isFixedVHD determines if the image at the supplied path looks like a fixed
+// VHD image. Qemu isn't able to autodetect these because it doesn't look at the
+// footer.
+func isFixedVHD(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		log.Errorln("cannot open", path, "for fixed VHD autodetection:", err)
+		return false
+	}
+	defer f.Close()
+
+	if _, err := f.Seek(-int64(binary.Size(vhdFooter{})), io.SeekEnd); err != nil {
+		log.Debugln(path, "is not a VHD: not large enough")
+		return false
+	}
+
+	var footer vhdFooter
+	if err := binary.Read(f, binary.BigEndian, &footer); err != nil {
+		log.Errorln("cannot read bytes from", path, "for fixed VHD autodetection:", err)
+		return false
+	}
+
+	log.Debugln("possible VHD footer cookie for", path, ":", footer.Cookie)
+	if footer.Cookie != [8]byte{'c', 'o', 'n', 'e', 'c', 't', 'i', 'x'} {
+		log.Debugln(path, "is not a VHD: incorrect cookie")
+		return false
+	}
+
+	if footer.Type != 2 {
+		log.Debugln(path, "is not a fixed VHD")
+		return false
+	}
+
+	return true
+}
+
+type mbrPartitionEntry [16]byte
+
+type mbr struct {
+	Code       [446]byte
+	Partitions [4]mbrPartitionEntry
+	Signature  uint16
+}
+
+// isRaw determines if the image at the supplied path is a valid raw image, so
+// that we can tell qemu that it is a raw image in order to disable the restrictions
+// on block 0 writes. Note that we consider an image to be a valid raw image if it
+// starts with a MBR.
+func isRaw(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		log.Errorln("cannot open", path, "for raw image autodetection:", err)
+		return false
+	}
+	defer f.Close()
+
+	var mbr mbr
+	if err := binary.Read(f, binary.LittleEndian, &mbr); err != nil {
+		log.Debugln(path, "does not have a valid MBR and so it's not a valid raw image: not large enough")
+		return false
+	}
+	if mbr.Signature != 0xaa55 {
+		log.Debugln(path, "does not have a valid MBR and so it's not a valid raw image: invalid MBR signature")
+		return false
+	}
+
+	return true
+}
+
+// getImageTypeHint attempts to determine whether the image at the supplied
+// path is one of the formats that qemu has difficulty autodetecting.
+func getImageTypeHint(path string) imageType {
+	log.Debugln("detecting type of image at", path)
+
+	switch {
+	case isFixedVHD(path):
+		log.Debugln("detected a fixed VHD")
+		return imageTypeFixedVHD
+	case isRaw(path):
+		log.Debugln("detected a raw image")
+		return imageTypeRaw
+	}
+
+	log.Debugln("leaving qemu-nbd to autodetect the image type")
+	return imageTypeAutodetect
 }
 
 type nbdDev int
@@ -112,6 +228,7 @@ func (d nbdDev) String() string {
 
 type Connection struct {
 	sourcePath string
+	imageType  imageType
 
 	logger log.FieldLogger
 
@@ -136,7 +253,16 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 
 	qemuNbdStarted := make(chan int)
 	go func() {
-		cmd := internal_exec.LoggedCommand("qemu-nbd", "-v", "-c", dev.devPath(), c.sourcePath)
+		args := []string{"-v"}
+		switch c.imageType {
+		case imageTypeAutodetect:
+		case imageTypeFixedVHD:
+			args = append(args, "-f", "vpc")
+		case imageTypeRaw:
+			args = append(args, "-f", "raw")
+		}
+		args = append(args, "-c", dev.devPath(), c.sourcePath)
+		cmd := internal_exec.LoggedCommand("qemu-nbd", args...)
 		if err := cmd.Start(); err != nil {
 			c.qemuNbdDone <- err
 			return
@@ -291,7 +417,7 @@ func ConnectImage(path string) (conn *Connection, err error) {
 		return nil, ErrKernelModuleNotLoaded
 	}
 
-	c := &Connection{sourcePath: path, qemuNbdDone: make(chan error)}
+	c := &Connection{sourcePath: path, imageType: getImageTypeHint(path), qemuNbdDone: make(chan error)}
 	c.logger = log.WithField("nbd.Connection", fmt.Sprintf("%p", c))
 	c.logger.Debugln("created Connection for", path)
 

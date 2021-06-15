@@ -332,6 +332,43 @@ func (s *nbdSuite) TestConnectFail(c *C) {
 	c.Check(s.qemunbdCmd.Calls(), HasLen, 1600)
 }
 
+type testGetImageTypeHintData struct {
+	path     string
+	expected ImageType
+}
+
+func (s *nbdSuite) testGetImageTypeHint(c *C, data *testGetImageTypeHintData) {
+	c.Check(GetImageTypeHint(data.path), Equals, data.expected)
+}
+
+func (s *nbdSuite) TestGetImageTypeHintFixedVHD(c *C) {
+	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
+		path:     "testdata/fixed.vhd",
+		expected: ImageTypeFixedVHD,
+	})
+}
+
+func (s *nbdSuite) TestGetImageTypeHintDynamicVHD(c *C) {
+	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
+		path:     "testdata/dynamic.vhd",
+		expected: ImageTypeAutodetect,
+	})
+}
+
+func (s *nbdSuite) TestGetImageTypeHintQCow2(c *C) {
+	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
+		path:     "testdata/test.qcow2",
+		expected: ImageTypeAutodetect,
+	})
+}
+
+func (s *nbdSuite) TestGetImageTypeHintRaw(c *C) {
+	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
+		path:     "testdata/test.raw",
+		expected: ImageTypeRaw,
+	})
+}
+
 var (
 	mockUdevadmMonitor = flag.String("mock-udevadm-monitor", "", "")
 	mockQemuNbd        = flag.String("mock-qemu-nbd", "", "")

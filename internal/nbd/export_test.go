@@ -19,6 +19,16 @@
 
 package nbd
 
+type ImageType = imageType
+
+const (
+	ImageTypeAutodetect = imageTypeAutodetect
+	ImageTypeFixedVHD   = imageTypeFixedVHD
+	ImageTypeRaw        = imageTypeRaw
+)
+
+var GetImageTypeHint = getImageTypeHint
+
 func MockSysfsPath(path string) (restore func()) {
 	orig := sysfsPath
 	sysfsPath = path
