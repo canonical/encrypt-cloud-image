@@ -48,7 +48,7 @@ $ sudo ./encrypt-cloud-image deploy --srk-pub <srkpub_path> --srk-template-uniqu
 ```
 Note that the format of the data supplied via the `--srk-template-unique-data` option is not the same as the format supplied to the `tpm2_createprimary` command via the `--unique-data` option. This tool expects it to be in the TPM wire format which implies big-endian byte ordering, whereas `tpm2_createprimary` requires little-endian byte ordering for this option.
 
-If neither the `--standard-srk-template` or `--srk-template-unique-data` options are supplied, the template will have a unique area with zero-sized fields.
+If neither the `--standard-srk-template` or `--srk-template-unique-data` options are supplied, the template is assumed to have a unique area with zero-sized fields. This is the default when calling `tpm2_createprimary` without the `--unique-data` option.
 
 ### PCR policy configuration
 The `deploy` subcommand has several options for customizing the PCR policy of the TPM protected key:
