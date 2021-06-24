@@ -30,7 +30,6 @@ import (
 	"sort"
 
 	"github.com/canonical/go-efilib"
-	"github.com/canonical/tcglog-parser"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 	"github.com/jessevdk/go-flags"
 
@@ -41,8 +40,7 @@ type Options struct {
 	In  string `short:"i" long:"in" description:"Directory containing ESLs that comprise the platform's secure boot configuration"`
 	Out string `short:"o" long:"out" description:"Output file name" required:"true"`
 
-	OmitsReadyToBootSignal bool     `long:"omits-ready-to-boot-signal" description:"The platform omits the \"Calling EFI Application from Boot Option\" EV_EFI_ACTION event in PCR4"`
-	LogAlgorithms          []string `long:"log-alg" description:"The algorithms to add to the generated TCG log" default:"sha256" choice:"sha1" choice:"sha256" choice:"sha384" choice:"sha512"`
+	OmitsReadyToBootSignal bool `long:"omits-ready-to-boot-signal" description:"The platform omits the \"Calling EFI Application from Boot Option\" EV_EFI_ACTION event in PCR4"`
 
 	SaveDatabases string `long:"save-databases" description:"Write the contents of the database variables to the specified directory"`
 }
@@ -161,24 +159,6 @@ func run(args []string) error {
 		if err := populateConfigFromVars(&config); err != nil {
 			return xerrors.Errorf("cannot populate config from EFI variables: %w", err)
 		}
-	}
-
-	for _, s := range options.LogAlgorithms {
-		var a tcglog.AlgorithmId
-		switch s {
-		case "sha1":
-			a = tcglog.AlgorithmSha1
-		case "sha256":
-			a = tcglog.AlgorithmSha256
-		case "sha384":
-			a = tcglog.AlgorithmSha384
-		case "sha512":
-			a = tcglog.AlgorithmSha512
-		default:
-			panic("unexpected algorithm: " + s)
-		}
-
-		config.LogAlgorithms = append(config.LogAlgorithms, a)
 	}
 
 	config.OmitsReadyToBootEvent = options.OmitsReadyToBootSignal

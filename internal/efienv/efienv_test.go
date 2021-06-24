@@ -205,7 +205,7 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 	c.Check(dec.Decode(&config), IsNil)
 	c.Check(f.Close(), IsNil)
 
-	env := NewEnvironment(&config)
+	env := NewEnvironment(&config, data.logAlgs)
 
 	for _, v := range []struct {
 		guid efi.GUID
@@ -280,7 +280,7 @@ func (s *efienvSuite) TestNewEnvironment2(c *C) {
 
 func (s *efienvSuite) TestNewEnvironment3(c *C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
-		path:                  "testdata/uefi-more-algs.json",
+		path:                  "testdata/uefi.json",
 		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha1, tcglog.AlgorithmSha256},
 		omitsReadyToBootEvent: false,
 	})

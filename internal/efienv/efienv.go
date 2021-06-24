@@ -20,104 +20,27 @@
 package efienv
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
-	log "github.com/sirupsen/logrus"
 	secboot_efi "github.com/snapcore/secboot/efi"
 )
 
-type configRaw struct {
-	PK                    []byte   `json:"PK"`
-	KEK                   []byte   `json:"KEK"`
-	Db                    []byte   `json:"db"`
-	Dbx                   []byte   `json:"dbx"`
-	LogAlgorithms         []string `json:"logAlgorithms"`
-	OmitsReadyToBootEvent bool     `json:"omitsReadyToBootEvent"`
-}
-
 type Config struct {
-	PK  []byte
-	KEK []byte
-	Db  []byte
-	Dbx []byte
-
-	LogAlgorithms         tcglog.AlgorithmIdList
-	OmitsReadyToBootEvent bool
-}
-
-func (c Config) MarshalJSON() ([]byte, error) {
-	raw := configRaw{
-		PK:                    c.PK,
-		KEK:                   c.KEK,
-		Db:                    c.Db,
-		Dbx:                   c.Dbx,
-		OmitsReadyToBootEvent: c.OmitsReadyToBootEvent}
-
-	for _, a := range c.LogAlgorithms {
-		var s string
-		switch a {
-		case tcglog.AlgorithmSha1:
-			s = "sha1"
-		case tcglog.AlgorithmSha256:
-			s = "sha256"
-		case tcglog.AlgorithmSha384:
-			s = "sha384"
-		case tcglog.AlgorithmSha512:
-			s = "sha512"
-		default:
-			log.Panicln("unrecognized algorithm")
-		}
-
-		raw.LogAlgorithms = append(raw.LogAlgorithms, s)
-	}
-
-	return json.Marshal(raw)
-}
-
-func (c *Config) UnmarshalJSON(d []byte) error {
-	var raw configRaw
-	if err := json.Unmarshal(d, &raw); err != nil {
-		return err
-	}
-
-	c.PK = raw.PK
-	c.KEK = raw.KEK
-	c.Db = raw.Db
-	c.Dbx = raw.Dbx
-
-	for _, s := range raw.LogAlgorithms {
-		var a tcglog.AlgorithmId
-		switch s {
-		case "sha1":
-			a = tcglog.AlgorithmSha1
-		case "sha256":
-			a = tcglog.AlgorithmSha256
-		case "sha384":
-			a = tcglog.AlgorithmSha384
-		case "sha512":
-			a = tcglog.AlgorithmSha512
-		default:
-			return fmt.Errorf("invalid algorithm: %s", s)
-		}
-
-		c.LogAlgorithms = append(c.LogAlgorithms, a)
-	}
-
-	c.OmitsReadyToBootEvent = raw.OmitsReadyToBootEvent
-
-	return nil
+	PK                    []byte `json:"PK"`
+	KEK                   []byte `json:"KEK"`
+	Db                    []byte `json:"db"`
+	Dbx                   []byte `json:"dbx"`
+	OmitsReadyToBootEvent bool   `json:"omitsReadyToBootEvent"`
 }
 
 type env struct {
 	*Config
+	logAlgorithms tcglog.AlgorithmIdList
 }
 
 func (e *env) makeEFIVariableDriverConfigEvent(pcr tcglog.PCRIndex, name string, guid efi.GUID, data []byte) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
-	for _, alg := range e.LogAlgorithms {
+	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeEFIVariableDataDigest(alg.GetHash(), name, guid, data)
 	}
 
@@ -133,7 +56,7 @@ func (e *env) makeEFIVariableDriverConfigEvent(pcr tcglog.PCRIndex, name string,
 
 func (e *env) makeSeparatorEvent(pcr tcglog.PCRIndex) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
-	for _, alg := range e.LogAlgorithms {
+	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeSeparatorEventDigest(alg.GetHash(), tcglog.SeparatorEventNormalValue)
 	}
 
@@ -146,7 +69,7 @@ func (e *env) makeSeparatorEvent(pcr tcglog.PCRIndex) *tcglog.Event {
 
 func (e *env) makeEFIActionEvent(pcr tcglog.PCRIndex, data tcglog.EventData) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
-	for _, alg := range e.LogAlgorithms {
+	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeStringEventDigest(alg.GetHash(), data.String())
 	}
 
@@ -183,7 +106,7 @@ func (e *env) ReadVar(name string, guid efi.GUID) ([]byte, efi.VariableAttribute
 }
 
 func (e *env) ReadEventLog() (*tcglog.Log, error) {
-	log := &tcglog.Log{Spec: tcglog.SpecEFI_2, Algorithms: e.LogAlgorithms}
+	log := &tcglog.Log{Spec: tcglog.SpecEFI_2, Algorithms: e.logAlgorithms}
 
 	log.Events = append(log.Events, e.makeEFIVariableDriverConfigEvent(7, "SecureBoot", efi.GlobalVariable, []byte{0x01}))
 	log.Events = append(log.Events, e.makeEFIVariableDriverConfigEvent(7, "PK", efi.GlobalVariable, nil))
@@ -200,6 +123,6 @@ func (e *env) ReadEventLog() (*tcglog.Log, error) {
 	return log, nil
 }
 
-func NewEnvironment(config *Config) secboot_efi.HostEnvironment {
-	return &env{config}
+func NewEnvironment(config *Config, logAlgorithms tcglog.AlgorithmIdList) secboot_efi.HostEnvironment {
+	return &env{config, logAlgorithms}
 }

@@ -31,6 +31,7 @@ import (
 
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/go-tpm2/mu"
+	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
 	"github.com/snapcore/secboot"
 	secboot_efi "github.com/snapcore/secboot/efi"
@@ -232,7 +233,7 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 			return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
 		}
 
-		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile)
+		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
 		if err != nil {
 			return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
 		}
@@ -252,7 +253,7 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 			return nil, xerrors.Errorf("cannot decode UEFI config: %w", err)
 		}
 
-		return efienv.NewEnvironment(&config), nil
+		return efienv.NewEnvironment(&config, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256}), nil
 	}
 
 	return nil, nil

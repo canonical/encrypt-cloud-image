@@ -90,7 +90,7 @@ func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
 		return nil, fmt.Errorf("unexpected resource type %s", profile.Type)
 	}
 
-	config := &Config{LogAlgorithms: tcglog.AlgorithmIdList{tcglog.AlgorithmSha256}, OmitsReadyToBootEvent: false}
+	config := &Config{OmitsReadyToBootEvent: false}
 
 	if profile.Properties == nil {
 		return config, nil
@@ -154,11 +154,11 @@ func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
 	return config, nil
 }
 
-func NewEnvironmentFromAzDiskProfile(profile *AzDisk) (secboot_efi.HostEnvironment, error) {
+func NewEnvironmentFromAzDiskProfile(profile *AzDisk, logAlgorithms tcglog.AlgorithmIdList) (secboot_efi.HostEnvironment, error) {
 	config, err := newConfigFromAzDiskProfile(profile)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewEnvironment(config), nil
+	return NewEnvironment(config, logAlgorithms), nil
 }
