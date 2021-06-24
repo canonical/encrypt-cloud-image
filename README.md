@@ -35,14 +35,14 @@ $ sudo ./encrypt-cloud-image encrypt -o <output_path> --grow-root <input_path>
 ```
 
 ### SRK template customization
-This tool does not have access to the virtual TPM associated with a guest, and so the storage primary key (SRK) must be created by and supplied from another tool as a *TPM2B_PUBLIC* structure serialized to a file in the TPM wire format, using the `--srk-pub` option.
+This tool does not have access to the virtual TPM associated with a guest, and so the storage primary key (SRK) must be created by and supplied from another tool as a `TPM2B_PUBLIC` structure serialized to a file in the TPM wire format, using the `--srk-pub` option.
 
 If the storage primary key is created with the standard template as defined in section 7.5.1 (*Foundational Elements of the TPM Provisioning Process - Storage Hierarchy - Storage Primary Key (SRK) Templates*) of the [TCG TPM v2.0 Provisioning Guidance specification](https://trustedcomputinggroup.org/wp-content/uploads/TCG-TPM-v2.0-Provisioning-Guidance-Published-v1r1.pdf), then the `encrypt` subcommand must be called with the `--standard-srk-template` option:
 ```
 $ sudo ./encrypt-cloud-image deploy --srk-pub <srkpub_path> --standard-srk-template <output_path>
 ```
 
-If the storage primary key is not created with the standard template, then the template is inferred from a combination of the supplied SRK public area (using the `--srk-pub` option) and the unique data supplied to the `TPM2_CreatePrimary` command, which must be supplied to this tool as a *TPMU_PUBLIC_ID* structure serialized to a file in the TPM wire format, using the `--srk-template-unique-data` option:
+If the storage primary key is not created with the standard template, then the template is inferred from a combination of the supplied SRK public area (using the `--srk-pub` option) and the unique data supplied to the `TPM2_CreatePrimary` command, which must be supplied to this tool as a `TPMU_PUBLIC_ID` structure serialized to a file in the TPM wire format, using the `--srk-template-unique-data` option:
 ```
 $ sudo ./encrypt-cloud-image deploy --srk-pub <srkpub_path> --srk-template-unique-data <unique_data_path> <output_path>
 ```
@@ -63,5 +63,5 @@ By default, the `deploy` subcommand will use the UEFI configuration of the host 
   - `KEK` [base64] - The value of the KEK variable.
   - `db` [base64] - The value of the db variable.
   - `dbx` [base64] - The value of the dbx variable.
-  - `omitsReadyToBootEvent` [bool] - Whether the firmware omits the *Calling EFI Application From Boot Option* EV_EFI_ACTION event in PCR4.
+  - `omitsReadyToBootEvent` [bool] - Whether the firmware omits the *Calling EFI Application From Boot Option* `EV_EFI_ACTION` event in PCR4.
 - `--az-disk-profile`: documentation *TODO*
