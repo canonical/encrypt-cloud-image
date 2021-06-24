@@ -25,6 +25,7 @@ import (
 
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
+	log "github.com/sirupsen/logrus"
 	secboot_efi "github.com/snapcore/secboot/efi"
 )
 
@@ -67,7 +68,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		case tcglog.AlgorithmSha512:
 			s = "sha512"
 		default:
-			panic("unrecognized algorithm")
+			log.Panicln("unrecognized algorithm")
 		}
 
 		raw.LogAlgorithms = append(raw.LogAlgorithms, s)

@@ -149,7 +149,7 @@ func (c *LoggedCmd) Start() error {
 		// Avoid a deadlock in Wait() if scanner failed with an error before
 		// the pipe was closed
 		if err != nil {
-			c.logger.Warningln("scanner failed with an error:", scanner.Err())
+			c.logger.WithError(scanner.Err()).Warningln("scanner failed with an error")
 			r.Close()
 		}
 

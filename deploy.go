@@ -404,6 +404,6 @@ func deployImage(opts *deployOptions) error {
 
 func init() {
 	if _, err := parser.AddCommand("deploy", "Prepare an encrypted image for deployment to a specific guest instance", "", &deployOptions{}); err != nil {
-		panic(err)
+		log.WithError(err).Panicln("cannot add deploy command")
 	}
 }

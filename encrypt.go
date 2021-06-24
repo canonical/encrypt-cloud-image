@@ -188,7 +188,7 @@ func encryptExtDevice(path string) error {
 	defer func() {
 		log.Infoln("detaching", volumeName)
 		if err := luks2.Deactivate(volumeName); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot detach container: %w", err)})
+			log.WithError(err).Panicln("cannot detach container")
 		}
 	}()
 	path = filepath.Join("/dev/mapper", volumeName)
@@ -314,7 +314,7 @@ func connectImage(workingDir, path string, opts *encryptOptions) (*nbd.Connectio
 	}
 	defer func() {
 		if err := srcImg.Close(); err != nil {
-			log.Warningln("cannot close source image: %v", err)
+			log.WithError(err).Warningln("cannot close source image")
 		}
 	}()
 
@@ -373,7 +373,7 @@ func encryptImage(opts *encryptOptions) (err error) {
 			return
 		}
 		if err := os.Rename(nbdConn.SourcePath(), opts.Output); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot move working image to final path: %w", err)})
+			log.WithError(err).Panicln("cannot move working image to final path")
 		}
 	}()
 	defer disconnectNbd()
@@ -427,6 +427,6 @@ func encryptImage(opts *encryptOptions) (err error) {
 
 func init() {
 	if _, err := parser.AddCommand("encrypt", "Encrypt an image without protecting the key to a specific guest instance", "", &encryptOptions{}); err != nil {
-		panic(err)
+		log.WithError(err).Panicln("cannot add encrypt command")
 	}
 }

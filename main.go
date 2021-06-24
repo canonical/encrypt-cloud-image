@@ -29,13 +29,14 @@ import (
 	"time"
 
 	"github.com/canonical/go-efilib"
-	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
 	"golang.org/x/xerrors"
+
+	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
+	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
+	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
 )
 
 const (
@@ -57,18 +58,6 @@ var (
 	parser = flags.NewParser(&opts, flags.Default)
 )
 
-type cleanupError struct {
-	err error
-}
-
-func (e *cleanupError) Error() string {
-	return e.err.Error()
-}
-
-func (e *cleanupError) Unwrap() error {
-	return e.err
-}
-
 func unmount(path string) error {
 	cmd := internal_exec.LoggedCommand("umount", path)
 	return cmd.Run()
@@ -82,7 +71,7 @@ func mount(dev, path, fs string) (cleanup func(), err error) {
 	return func() {
 		log.Debugln("unmounting", path)
 		if err := unmount(path); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot unmount %s: %w", path, err)})
+			log.WithError(err).Panicln("cannot unmount", path)
 		}
 	}, nil
 }
@@ -96,7 +85,7 @@ func connectNbd(path string) (conn *nbd.Connection, cleanup func(), err error) {
 	return conn, func() {
 		log.Debugln("disconnecting", conn.DevPath())
 		if err := conn.Disconnect(); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)})
+			log.WithError(err).Panicln("cannot disconnect from", conn.DevPath())
 		}
 	}, nil
 }
@@ -109,7 +98,7 @@ func mkTempDir(dir string) (name string, cleanup func(), err error) {
 	return name, func() {
 		log.Debugln("removing", name)
 		if err := os.RemoveAll(name); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot remove temporary directory: %w", err)})
+			log.WithError(err).Panicln("cannot remove temporary directory")
 		}
 	}, nil
 }
@@ -197,18 +186,6 @@ func run(args []string) (err error) {
 }
 
 func main() {
-	defer func() {
-		if v := recover(); v != nil {
-			if e, ok := v.(error); ok {
-				var c *cleanupError
-				if xerrors.As(e, &c) {
-					log.Fatal(e)
-				}
-			}
-			panic(v)
-		}
-	}()
-
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}

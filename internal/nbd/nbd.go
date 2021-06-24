@@ -93,7 +93,7 @@ type vhdFooter struct {
 func isFixedVHD(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
-		log.Errorln("cannot open", path, "for fixed VHD autodetection:", err)
+		log.WithError(err).Errorln("cannot open", path, "for fixed VHD autodetection")
 		return false
 	}
 	defer f.Close()
@@ -105,7 +105,7 @@ func isFixedVHD(path string) bool {
 
 	var footer vhdFooter
 	if err := binary.Read(f, binary.BigEndian, &footer); err != nil {
-		log.Errorln("cannot read bytes from", path, "for fixed VHD autodetection:", err)
+		log.WithError(err).Errorln("cannot read bytes from", path, "for fixed VHD autodetection")
 		return false
 	}
 
@@ -138,7 +138,7 @@ type mbr struct {
 func isRaw(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
-		log.Errorln("cannot open", path, "for raw image autodetection:", err)
+		log.WithError(err).Errorln("cannot open", path, "for raw image autodetection")
 		return false
 	}
 	defer f.Close()
@@ -293,7 +293,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 	defer func() {
 		c.logger.Debugln("killing udevadm monitor")
 		if err := udevadmCmd.Process.Kill(); err != nil {
-			panic(xerrors.Errorf("cannot kill udevadm monitor: %w", err))
+			log.WithError(err).Panicln("cannot kill udevadm monitor")
 		}
 		udevadmCmd.Wait()
 
@@ -314,7 +314,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 			if err := p.Kill(); err != nil {
 				var e syscall.Errno
 				if xerrors.As(err, &e) {
-					panic(xerrors.Errorf("cannot kill qemu-nbd: %w", err))
+					log.WithError(err).Panicln("cannot kill qemu-nbd")
 				}
 			}
 		}
@@ -405,7 +405,7 @@ func (c *Connection) Disconnect() error {
 	}
 
 	if err := <-c.qemuNbdDone; err != nil {
-		c.logger.Warningln("qemu-nbd exitted with an error:", err)
+		c.logger.WithError(err).Warningln("qemu-nbd exitted with an error")
 	}
 
 	return nil
@@ -426,11 +426,13 @@ func ConnectImage(path string) (conn *Connection, err error) {
 
 	defer func() {
 		if v := recover(); v != nil {
-			if e, ok := v.(error); ok {
-				var s syscall.Errno
-				if xerrors.As(e, &s) {
-					err = e
-					return
+			if entry, ok := v.(*log.Entry); ok {
+				if e, ok := entry.Data[log.ErrorKey]; ok {
+					var s syscall.Errno
+					if xerrors.As(e.(error), &s) {
+						err = e.(error)
+						return
+					}
 				}
 			}
 			panic(v)
