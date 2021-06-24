@@ -5,12 +5,10 @@ This repository contains a tool that can pre-encrypt an Ubuntu cloud image with 
 - `deploy`: Take a pre-encrypted image and protect the key to a virtual TPM associated with a specific guest instance, removing the cleartext key in the process. Once this step has been performed, the image is only bootable on that specific guest instance. The deploy step does not need access to the actual TPM, but does need access to the public area of the storage primary key.
 
 ## Runtime prerequisites
-- Ubuntu 20.04 environment
+- Ubuntu environment
 - root privileges (required to create NBD devices, use /dev/mapper/control and mount block devices)
-- nbd kernel module
-- cryptsetup
-- e2fsprogs
-- mount
+- cryptsetup (>= 2.2.0, which implies at least Ubuntu 20.04 LTS)
+- qemu-utils
 - cloud-guest-utils
 
 ## Basic usage
