@@ -33,7 +33,7 @@ func mkFifo() (string, func(), error) {
 	// /run is not world writable but we create a unique directory here because this
 	// code can be invoked by a public API and we shouldn't fail if more than one
 	// process reaches here at the same time.
-	dir, err := ioutil.TempDir(runDir, filepath.Base(os.Args[0])+".")
+	dir, err := ioutil.TempDir("/run", filepath.Base(os.Args[0])+".")
 	if err != nil {
 		return "", nil, xerrors.Errorf("cannot create temporary directory: %w", err)
 	}

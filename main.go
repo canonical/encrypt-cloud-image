@@ -20,44 +20,27 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
-	"crypto"
-	"crypto/rand"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/canonical/go-efilib"
-	"github.com/canonical/go-tpm2"
-	"github.com/canonical/go-tpm2/mu"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/gpt"
-	internal_ioutil "github.com/chrisccoulson/encrypt-cloud-image/internal/ioutil"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/luks2"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
-	"github.com/snapcore/secboot"
-	secboot_efi "github.com/snapcore/secboot/efi"
 
 	"golang.org/x/xerrors"
 )
 
 const (
-	luks2MetadataKiBSize = 512
-	luks2HeaderKiBSize   = 16 * 1024
+	luks2TokenType = "ubuntu-fde-cloudimg-key"
+	luks2TokenKey  = "ubuntu_fde_cloudimg_key"
 )
 
 var (
@@ -65,29 +48,14 @@ var (
 	linuxFilesystemGUID = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
 )
 
-type Options struct {
-	Input string `short:"i" long:"input" description:"Input image path" required:"true"`
-
-	Output string `short:"o" long:"output" description:"Output image path" required:"true"`
-
+type options struct {
 	Verbose bool `short:"v" long:"verbose" description:"Enable verbose debug output"`
-
-	AddEFIBootManagerProfile bool `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
-	AddEFISecureBootProfile  bool `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
-	AddUbuntuKernelProfile   bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
-
-	AzDiskProfile string `long:"az-disk-profile" description:""`
-	UefiConfig    string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
-
-	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
-	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
-	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
-
-	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
-
-	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
-	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 }
+
+var (
+	opts   options
+	parser = flags.NewParser(&opts, flags.Default)
+)
 
 type cleanupError struct {
 	err error
@@ -101,479 +69,63 @@ func (e *cleanupError) Unwrap() error {
 	return e.err
 }
 
-func getBlockDeviceSize(path string) (int64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	return f.Seek(0, io.SeekEnd)
-}
-
-func growPartition(diskDevPath, partDevPath string, partNum int) error {
-	log.Infoln("growing encrypted partition")
-
-	sz, err := getBlockDeviceSize(partDevPath)
-	if err != nil {
-		return xerrors.Errorf("cannot determine current partition size: %w", err)
-	}
-	log.Debugln("current size:", sz)
-
-	cmd := internal_exec.LoggedCommand("growpart", diskDevPath, strconv.Itoa(partNum))
-	if err := cmd.Run(); err != nil {
-		return xerrors.Errorf("cannot grow partition: %w", err)
-	}
-
-	// XXX: This is a bit of a hack to avoid a race whilst the kernel
-	// re-reads the partition table.
-	time.Sleep(2 * time.Second)
-	sz, err = getBlockDeviceSize(partDevPath)
-	if err != nil {
-		return xerrors.Errorf("cannot determine new partition size: %w", err)
-	}
-	log.Debugln("new size:", sz)
-
-	return nil
-}
-
-func customizeRootFS(workingDir, path string, options *Options) error {
-	if options.OverrideDatasources == "" && !options.GrowRoot {
-		return nil
-	}
-
-	log.Infoln("applying customizations to image")
-
-	mountPath := filepath.Join(workingDir, "rootfs")
-
-	if err := os.Mkdir(mountPath, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
-	}
-
-	log.Infoln("mounting root filesystem")
-	if err := mount(path, mountPath, "ext4"); err != nil {
-		return xerrors.Errorf("cannot mount rootfs: %w", err)
-	}
-	defer func() {
-		log.Infoln("unmounting root filesystem")
-		if err := unmount(mountPath); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot unmount rootfs: %w", err)})
-		}
-	}()
-
-	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
-
-	if options.OverrideDatasources != "" {
-		datasourceOverrideTmpl := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
-datasource_list: [ %s ]
-`
-		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, options.OverrideDatasources)
-
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
-			return xerrors.Errorf("cannot create datasource override file: %w", err)
-		}
-	}
-
-	if options.GrowRoot {
-		disableGrowPart := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
-growpart:
-    mode: off
-`
-
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
-			return xerrors.Errorf("cannot create growpart override file: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
-	log.Debugln("reading unique data from", path)
-
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, xerrors.Errorf("cannot open file: %w", err)
-	}
-
-	switch alg {
-	case tpm2.ObjectTypeRSA:
-		var rsa tpm2.PublicKeyRSA
-		if _, err := mu.UnmarshalFromReader(f, &rsa); err != nil {
-			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
-		}
-		return &tpm2.PublicIDU{RSA: rsa}, nil
-	case tpm2.ObjectTypeECC:
-		var ecc *tpm2.ECCPoint
-		if _, err := mu.UnmarshalFromReader(f, &ecc); err != nil {
-			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
-		}
-		return &tpm2.PublicIDU{ECC: ecc}, nil
-	}
-
-	return nil, errors.New("unsupported type")
-}
-
-func writeCustomSRKTemplate(srkPub *tpm2.Public, path string, options *Options) error {
-	log.Infoln("writing custom SRK template to", path)
-
-	b, err := mu.MarshalToBytes(srkPub)
-	if err != nil {
-		return xerrors.Errorf("cannot marshal SRKpub: %w", err)
-	}
-
-	var srkTmpl *tpm2.Public
-	if _, err := mu.UnmarshalFromBytes(b, &srkTmpl); err != nil {
-		return xerrors.Errorf("cannot unmarshal SRK template: %w", err)
-	}
-	srkTmpl.Unique = nil
-
-	if options.SRKTemplateUniqueData != "" {
-		u, err := readUniqueData(options.SRKTemplateUniqueData, srkTmpl.Type)
-		if err != nil {
-			return xerrors.Errorf("cannot read unique data: %w", err)
-		}
-		srkTmpl.Unique = u
-	}
-
-	b, err = mu.MarshalToBytes(srkTmpl)
-	if err != nil {
-		return xerrors.Errorf("cannot marshal SRK template: %w", err)
-	}
-
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return xerrors.Errorf("cannot open file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := mu.MarshalToWriter(f, b); err != nil {
-		return xerrors.Errorf("cannot write SRK template to file: %w", err)
-	}
-
-	return nil
-}
-
-func readPublicArea(path string) (*tpm2.Public, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var pubBytes []byte
-	if _, err := mu.UnmarshalFromReader(f, &pubBytes); err != nil {
-		return nil, xerrors.Errorf("cannot unmarshal public area bytes: %w", err)
-	}
-
-	var pub *tpm2.Public
-	if _, err := mu.UnmarshalFromBytes(pubBytes, &pub); err != nil {
-		return nil, xerrors.Errorf("cannot unmarshal public area: %w", err)
-	}
-
-	return pub, nil
-}
-
-func computePCRProtectionProfile(esp string, options *Options, env secboot_efi.HostEnvironment) (*secboot.PCRProtectionProfile, error) {
-	log.Infoln("computing PCR protection profile")
-	pcrProfile := secboot.NewPCRProtectionProfile()
-
-	loadSequences := []*secboot_efi.ImageLoadEvent{
-		{
-			Source: secboot_efi.Firmware,
-			Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
-			Next: []*secboot_efi.ImageLoadEvent{
-				{
-					Source: secboot_efi.Shim,
-					Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
-				},
-			},
-		},
-	}
-
-	if options.AddEFIBootManagerProfile {
-		log.Debugln("adding boot manager PCR profile")
-		params := secboot_efi.BootManagerProfileParams{
-			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: loadSequences,
-			Environment:   env}
-		if err := secboot_efi.AddBootManagerProfile(pcrProfile, &params); err != nil {
-			return nil, xerrors.Errorf("cannot add EFI boot manager profile: %w", err)
-		}
-	}
-
-	if options.AddEFISecureBootProfile {
-		log.Debugln("adding secure boot policy PCR profile")
-		params := secboot_efi.SecureBootPolicyProfileParams{
-			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: loadSequences,
-			Environment:   env}
-		if err := secboot_efi.AddSecureBootPolicyProfile(pcrProfile, &params); err != nil {
-			return nil, xerrors.Errorf("cannot add EFI secure boot policy profile: %w", err)
-		}
-	}
-
-	if options.AddUbuntuKernelProfile {
-		pcrProfile.AddPCRValue(tpm2.HashAlgorithmSHA256, 12, make([]byte, tpm2.HashAlgorithmSHA256.Size()))
-
-		// Note, kernel EFI stub only measures a commandline if one is supplied
-		// TODO: Add kernel commandline
-		// TODO: Add snap model
-
-		// snap-bootstrap measures an epoch
-		h := crypto.SHA256.New()
-		binary.Write(h, binary.LittleEndian, uint32(0))
-		pcrProfile.ExtendPCR(tpm2.HashAlgorithmSHA256, 12, h.Sum(nil))
-	}
-
-	log.Debugln("PCR profile:", pcrProfile)
-	pcrs, digests, err := pcrProfile.ComputePCRDigests(nil, tpm2.HashAlgorithmSHA256)
-	if err != nil {
-		return nil, xerrors.Errorf("cannot compute PCR digests: %w", err)
-	}
-	log.Infoln("PCR selection:", pcrs)
-	log.Infoln("PCR digests:")
-	for _, digest := range digests {
-		log.Debugf(" %x\n", digest)
-	}
-
-	return pcrProfile, nil
-}
-
-func newEFIEnvironment(options *Options) (secboot_efi.HostEnvironment, error) {
-	log.Infoln("creating EFI environment for guest")
-	switch {
-	case options.AzDiskProfile != "":
-		log.Debugln("creating EFI environment from supplied az disk profile")
-		f, err := os.Open(options.AzDiskProfile)
-		if err != nil {
-			return nil, xerrors.Errorf("cannot open az disk profile resource: %w", err)
-		}
-		defer f.Close()
-
-		var profile efienv.AzDisk
-		dec := json.NewDecoder(f)
-		if err := dec.Decode(&profile); err != nil {
-			return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
-		}
-
-		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile)
-		if err != nil {
-			return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
-		}
-
-		return env, nil
-	case options.UefiConfig != "":
-		log.Debugln("creating EFI environment from supplied UEFI config")
-		f, err := os.Open(options.UefiConfig)
-		if err != nil {
-			return nil, xerrors.Errorf("cannot open UEFI config: %w", err)
-		}
-		defer f.Close()
-
-		var config efienv.Config
-		dec := json.NewDecoder(f)
-		if err := dec.Decode(&config); err != nil {
-			return nil, xerrors.Errorf("cannot decode UEFI config: %w", err)
-		}
-
-		return efienv.NewEnvironment(&config), nil
-	}
-
-	return nil, nil
-}
-
-func validImageExt(ext string) bool {
-	switch ext {
-	case ".img", ".vhd":
-		return true
-	default:
-		return false
-	}
-}
-
-func mount(dev, path, fs string) error {
-	cmd := internal_exec.LoggedCommand("mount", "-t", fs, dev, path)
-	return cmd.Run()
-}
-
 func unmount(path string) error {
 	cmd := internal_exec.LoggedCommand("umount", path)
 	return cmd.Run()
 }
 
-func luks2Encrypt(path string, key []byte) error {
-	cmd := internal_exec.LoggedCommand("cryptsetup",
-		// verbose
-		"-v",
-		// batch processing, no password verification for formatting an existing LUKS container
-		"-q",
-		// encrypt plaintext volume
-		"reencrypt", "--encrypt",
-		// use LUKS2
-		"--type", "luks2",
-		// read the key from stdin
-		"--key-file", "-",
-		// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
-		"--cipher", "aes-xts-plain64", "--key-size", "512",
-		// use argon2i as the KDF
-		"--pbkdf", "argon2i",
-		// set the KDF benchmark time
-		"--iter-time", "100",
-		// set the default metadata size to 512KiB
-		"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
-		// specify the keyslots area size of 16MiB - (2 * 512KiB)
-		"--luks2-keyslots-size", fmt.Sprintf("%dk", luks2HeaderKiBSize-(2*luks2MetadataKiBSize)),
-		// reduce the device size by 2 * the header size, as required by cryptsetup
-		"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
-		path)
-	cmd.Stdin = bytes.NewReader(key)
-
-	return cmd.Run()
-}
-
-func luks2SetLabel(path, label string) error {
-	cmd := internal_exec.LoggedCommand("cryptsetup", "-v", "config", "--label", label, path)
-	return cmd.Run()
-}
-
-func growExtFS(path string) error {
-	cmd := internal_exec.LoggedCommand("resize2fs", "-f", "-d", "30", path)
-	return cmd.Run()
-}
-
-func shrinkExtFS(path string) error {
-	cmd := internal_exec.LoggedCommand("resize2fs", "-fM", "-d", "62", path)
-	return cmd.Run()
-}
-
-func encryptExtDevice(path string) (k []byte, err error) {
-	log.Infoln("shrinking fileystem on", path)
-	if err := shrinkExtFS(path); err != nil {
-		return nil, xerrors.Errorf("cannot shrink filesystem: %w", err)
+func mount(dev, path, fs string) (cleanup func(), err error) {
+	cmd := internal_exec.LoggedCommand("mount", "-t", fs, dev, path)
+	if err := cmd.Run(); err != nil {
+		return nil, err
 	}
-
-	var key [32]byte
-	if _, err := rand.Read(key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot obtain primary unlock key: %w", err)
-	}
-
-	log.Infoln("encrypting", path)
-	if err := luks2Encrypt(path, key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot encrypt %s: %w", path, err)
-	}
-
-	log.Infoln("setting label")
-	if err := luks2SetLabel(path, "cloudimg-rootfs-enc"); err != nil {
-		return nil, xerrors.Errorf("cannot set label: %w", err)
-	}
-
-	volumeName := filepath.Base(path)
-	log.Infoln("attaching encrypted container as", volumeName)
-	if err := luks2.Activate(volumeName, path, key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot activate LUKS container: %w", err)
-	}
-	defer func() {
-		log.Infoln("detaching", volumeName)
-		if err := luks2.Deactivate(volumeName); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot detach container: %w", err)})
+	return func() {
+		log.Debugln("unmounting", path)
+		if err := unmount(path); err != nil {
+			panic(&cleanupError{xerrors.Errorf("cannot unmount %s: %w", path, err)})
 		}
-	}()
-	path = filepath.Join("/dev/mapper", volumeName)
-
-	log.Infoln("growing filesystem on", path)
-	if err := growExtFS(path); err != nil {
-		return nil, xerrors.Errorf("cannot grow filesystem: %w", err)
-	}
-
-	return key[:], nil
+	}, nil
 }
 
-type zipFileReader struct {
-	f *os.File
-	io.ReadCloser
-}
-
-func (r *zipFileReader) Close() error {
-	r.ReadCloser.Close()
-	return r.f.Close()
-}
-
-func openSourceImage(path string) (io.ReadCloser, error) {
-	log.Debugln("opening source image from", path)
-	f, err := os.Open(path)
+func connectNbd(path string) (conn *nbd.Connection, cleanup func(), err error) {
+	conn, err = nbd.ConnectImage(path)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot open file: %w", err)
+		return nil, nil, err
 	}
 
-	switch {
-	case filepath.Ext(path) == ".zip":
-		log.Debugln("detected zip archive")
-		fi, err := f.Stat()
-		if err != nil {
-			return nil, xerrors.Errorf("cannot determine file size: %w", err)
+	return conn, func() {
+		log.Debugln("disconnecting", conn.DevPath())
+		if err := conn.Disconnect(); err != nil {
+			panic(&cleanupError{xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)})
 		}
-		r, err := zip.NewReader(f, fi.Size())
-		if err != nil {
-			return nil, xerrors.Errorf("cannot create ZIP reader: %w", err)
-		}
-		log.Debugln("iterating zip archive files")
-		for _, zf := range r.File {
-			log.Debugln("trying", zf.Name)
-			if !validImageExt(filepath.Ext(zf.Name)) {
-				log.Debugln("...skipping")
-				continue
-			}
-
-			log.Debugln("...found file with valid extension")
-			rc, err := zf.Open()
-			if err != nil {
-				return nil, xerrors.Errorf("cannot open image in ZIP file: %w", err)
-			}
-			return &zipFileReader{f, rc}, nil
-		}
-	case validImageExt(filepath.Ext(path)):
-		log.Debugln("detecting unpacked and uncompressed image")
-		return f, nil
-	}
-
-	return nil, errors.New("no appropriate image found")
+	}, nil
 }
 
-func connectImage(workingDir string, options *Options) (*nbd.Connection, error) {
-	srcImg, err := openSourceImage(options.Input)
+func mkTempDir(dir string) (name string, cleanup func(), err error) {
+	name, err = ioutil.TempDir(dir, "encrypt-cloud-image.")
 	if err != nil {
-		return nil, xerrors.Errorf("cannot open source image: %w", err)
+		return "", nil, err
 	}
-	defer func() {
-		if err := srcImg.Close(); err != nil {
-			log.Warningln("cannot close source image: %v", err)
+	return name, func() {
+		log.Debugln("removing", name)
+		if err := os.RemoveAll(name); err != nil {
+			panic(&cleanupError{xerrors.Errorf("cannot remove temporary directory: %w", err)})
 		}
-	}()
-
-	workingImgPath := filepath.Join(workingDir, filepath.Base(options.Output))
-	log.Infoln("making copy of source image to", workingImgPath)
-	if err := internal_ioutil.CopyFromReaderToFile(workingImgPath, srcImg); err != nil {
-		return nil, xerrors.Errorf("cannot make working copy of source image: %w", err)
-	}
-
-	nbdConn, err := nbd.ConnectImage(workingImgPath)
-	if err != nil {
-		return nil, xerrors.Errorf("cannot connect %s: %w", workingImgPath, err)
-	}
-	log.Infoln("connected", workingImgPath, "to", nbdConn.DevPath())
-	return nbdConn, nil
+	}, nil
 }
 
-func checkPrerequisites(options *Options) error {
-	if options.StandardSRKTemplate && options.SRKTemplateUniqueData != "" {
-		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
+func runCommand(command flags.Commander, args []string) error {
+	if opts.Verbose {
+		log.SetLevel(log.DebugLevel)
+		log.Debugln("Enabling verbose output")
 	}
 
-	if options.AzDiskProfile != "" && options.UefiConfig != "" {
-		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
-	}
+	log.Debugln("args:", strings.Join(args, " "))
 
+	return command.Execute(args)
+}
+
+func checkPrerequisites() error {
 	if !nbd.IsSupported() {
 		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
 	}
@@ -581,17 +133,10 @@ func checkPrerequisites(options *Options) error {
 		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
 	}
 
-	for _, p := range []string{"cryptsetup", "resize2fs", "mount", "umount"} {
+	for _, p := range []string{"cryptsetup", "resize2fs", "mount", "umount", "growpart"} {
 		_, err := exec.LookPath(p)
 		if err != nil {
 			return fmt.Errorf("cannot continue: is %s installed?", p)
-		}
-	}
-
-	if options.GrowRoot {
-		_, err := exec.LookPath("growpart")
-		if err != nil {
-			return errors.New("cannot grow the root partition (is growpart installed?)")
 		}
 	}
 
@@ -632,152 +177,20 @@ func configureLogging() {
 func run(args []string) (err error) {
 	configureLogging()
 
-	var options Options
-	if _, err := flags.ParseArgs(&options, args); err != nil {
-		return xerrors.Errorf("cannot parse arguments: %w", err)
-	}
-
-	if options.Verbose {
-		log.SetLevel(log.DebugLevel)
-		log.Debugln("Enabling verbose output")
-	}
-
-	log.Debugln("args:", strings.Join(args, " "))
-
-	if err := checkPrerequisites(&options); err != nil {
+	if err := checkPrerequisites(); err != nil {
 		return err
 	}
 
-	workingDir, err := ioutil.TempDir(filepath.Dir(options.Output), "tmp.")
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(workingDir); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot remove working directory: %w", err)})
+	parser.CommandHandler = runCommand
+
+	if _, err := parser.ParseArgs(args); err != nil {
+		switch e := err.(type) {
+		case *flags.Error:
+			if e.Type == flags.ErrHelp {
+				return nil
+			}
 		}
-	}()
-	log.Infoln("temporary working directory:", workingDir)
-
-	nbdConn, err := connectImage(workingDir, &options)
-	if err != nil {
-		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			return
-		}
-		if err := os.Rename(nbdConn.SourcePath(), options.Output); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot move working image to final path: %w", err)})
-		}
-	}()
-	defer func() {
-		log.Infoln("disconnecting", nbdConn.DevPath())
-		if err := nbdConn.Disconnect(); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot disconnect from %s: %w", nbdConn.DevPath(), err)})
-		}
-	}()
-
-	partitions, err := gpt.ReadPartitionTable(nbdConn.DevPath())
-	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", nbdConn.DevPath(), err)
-	}
-	log.Debugln("partition table for", nbdConn.DevPath(), ":", partitions)
-
-	// XXX: Could there be more than one partition with this type?
-	root := partitions.FindByPartitionType(linuxFilesystemGUID)
-	if root == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, nbdConn.DevPath())
-	}
-	log.Debugln("rootfs partition on", nbdConn.DevPath(), ":", root)
-	rootDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), root.Index)
-	log.Infoln("device node for rootfs partition:", rootDevPath)
-
-	if err := customizeRootFS(workingDir, rootDevPath, &options); err != nil {
-		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
-	}
-
-	key, err := encryptExtDevice(rootDevPath)
-	if err != nil {
-		return xerrors.Errorf("cannot encrypt %s: %w", rootDevPath, err)
-	}
-
-	if options.GrowRoot {
-		if err := growPartition(nbdConn.DevPath(), rootDevPath, root.Index); err != nil {
-			return xerrors.Errorf("cannot grow root partition: %w", err)
-		}
-	}
-
-	esp := partitions.FindByPartitionType(espGUID)
-	if esp == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, nbdConn.DevPath())
-	}
-	log.Debugln("ESP on", nbdConn.DevPath(), ":", esp)
-	espDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), esp.Index)
-	log.Infoln("device node for ESP:", espDevPath)
-
-	espPath := filepath.Join(workingDir, "esp")
-	if err := os.Mkdir(espPath, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to mount ESP: %w", err)
-	}
-	log.Infoln("mounting ESP")
-	if err := mount(espDevPath, espPath, "vfat"); err != nil {
-		return xerrors.Errorf("cannot mount %s to %s: %w", espDevPath, espPath, err)
-	}
-	defer func() {
-		log.Infoln("unmounting ESP")
-		if err := unmount(espPath); err != nil {
-			panic(&cleanupError{xerrors.Errorf("cannot unmount %s: %w", espPath, err)})
-		}
-	}()
-
-	if options.KernelEfi != "" {
-		dst := filepath.Join(espPath, "EFI/ubuntu/grubx64.efi")
-		if err := os.Remove(dst); err != nil {
-			return xerrors.Errorf("cannot remove grub: %w", err)
-		}
-		if err := internal_ioutil.CopyFile(dst, options.KernelEfi); err != nil {
-			return xerrors.Errorf("cannot install kernel: %w", err)
-		}
-	}
-
-	efiEnv, err := newEFIEnvironment(&options)
-	if err != nil {
-		return xerrors.Errorf("cannot create EFI environment for target: %w", err)
-	}
-
-	pcrProfile, err := computePCRProtectionProfile(espPath, &options, efiEnv)
-	if err != nil {
-		return xerrors.Errorf("cannot compute PCR protection profile: %w", err)
-	}
-
-	srkPub, err := readPublicArea(options.SRKPub)
-	if err != nil {
-		return xerrors.Errorf("cannot read SRK public area: %w", err)
-	}
-	srkName, err := srkPub.Name()
-	if err != nil {
-		return xerrors.Errorf("cannot compute name of SRK: %w", err)
-	}
-	log.Infof("supplied SRK name: %x\n", srkName)
-
-	keyDir := filepath.Join(espPath, "device/fde")
-	if err := os.MkdirAll(keyDir, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to store sealed disk unlock key: %w", err)
-	}
-
-	log.Infoln("creating importable sealed key object")
-	params := secboot.KeyCreationParams{
-		PCRProfile:             pcrProfile,
-		PCRPolicyCounterHandle: tpm2.HandleNull}
-	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(keyDir, "cloudimg-rootfs.sealed-key"), &params); err != nil {
-		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
-	}
-
-	if !options.StandardSRKTemplate {
-		if err := writeCustomSRKTemplate(srkPub, filepath.Join(espPath, "tpm2-srk.tmpl"), &options); err != nil {
-			return xerrors.Errorf("cannot write custom SRK template: %w", err)
-		}
+		return xerrors.Errorf("cannot parse arguments: %w", err)
 	}
 
 	return nil

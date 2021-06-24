@@ -90,7 +90,7 @@ func run(args []string) error {
 		Properties: &efienv.AzDiskProperties{
 			UefiSettings: &efienv.AzUefiSettings{
 				SignatureMode: "Replace",
-				Signatures: new(efienv.AzUefiSignatures)}}}
+				Signatures:    new(efienv.AzUefiSignatures)}}}
 
 	r := bytes.NewReader(config.PK)
 	l, err := efi.ReadSignatureList(r)

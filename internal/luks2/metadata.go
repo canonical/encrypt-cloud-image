@@ -46,7 +46,7 @@ var (
 )
 
 func cryptsetupLockDir() string {
-	return filepath.Join(runDir, "cryptsetup")
+	return filepath.Join("/run", "cryptsetup")
 }
 
 var isBlockDevice = func(mode os.FileMode) bool {

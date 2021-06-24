@@ -48,8 +48,8 @@ type AzUefiSignatures struct {
 }
 
 type AzUefiSettings struct {
-	SignatureMode string `json:"signatureMode"`
-	Signatures *AzUefiSignatures `json:"signatures"`
+	SignatureMode string            `json:"signatureMode"`
+	Signatures    *AzUefiSignatures `json:"signatures"`
 }
 
 type AzDiskProperties struct {
@@ -58,7 +58,7 @@ type AzDiskProperties struct {
 
 // XXX: Use armcompute.Disk when it has the right properties.
 type AzDisk struct {
-	Type string `json:"type"`
+	Type       string            `json:"type"`
 	Properties *AzDiskProperties `json:"properties"`
 }
 
