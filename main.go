@@ -32,8 +32,6 @@ import (
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
-	"golang.org/x/xerrors"
-
 	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
 	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
@@ -55,7 +53,7 @@ type options struct {
 
 var (
 	opts   options
-	parser = flags.NewParser(&opts, flags.Default)
+	parser = flags.NewParser(&opts, flags.HelpFlag | flags.PassDoubleDash)
 )
 
 func unmount(path string) error {
@@ -176,10 +174,11 @@ func run(args []string) (err error) {
 		switch e := err.(type) {
 		case *flags.Error:
 			if e.Type == flags.ErrHelp {
+				fmt.Fprintln(os.Stdout, err)
 				return nil
 			}
 		}
-		return xerrors.Errorf("cannot parse arguments: %w", err)
+		return err
 	}
 
 	return nil
