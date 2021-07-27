@@ -7,7 +7,14 @@ This repository contains a tool that can pre-encrypt an Ubuntu cloud image with 
 ## Runtime prerequisites
 - Ubuntu environment
 - root privileges (required to create NBD devices, use /dev/mapper/control and mount block devices)
-- cryptsetup (>= 2.2.0, which implies at least Ubuntu 20.04 LTS)
+- cryptsetup (>= 2.2.0)
+  - Available from Ubuntu archive on 20.04 LTS and later
+  - For Ubuntu 18.04 LTS backport is available from
+```
+sudo add-apt-repository ppa:canonical-kernel-team/azure-test
+sudo apt-get update
+sudo apt install cryptsetup
+```
 - qemu-utils
 - cloud-guest-utils
 
