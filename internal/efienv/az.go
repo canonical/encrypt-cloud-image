@@ -64,22 +64,22 @@ type AzDisk struct {
 
 func decodeAzSignatureDb(azdb []*AzUefiSignatureList) (out efi.SignatureDatabase, err error) {
 	for _, azl := range azdb {
-		l := new(efi.SignatureList)
-
 		switch azl.Type {
 		case "x509":
-			l.Type = efi.CertX509Guid
+			for _, data := range azl.Value {
+				out = append(out, &efi.SignatureList{
+					Type:       efi.CertX509Guid,
+					Signatures: []*efi.SignatureData{{Owner: msOwnerGuid, Data: data}}})
+			}
 		case "sha256":
-			l.Type = efi.CertSHA256Guid
+			l := &efi.SignatureList{Type: efi.CertSHA256Guid}
+			for _, data := range azl.Value {
+				l.Signatures = append(l.Signatures, &efi.SignatureData{Owner: msOwnerGuid, Data: data})
+			}
+			out = append(out, l)
 		default:
 			return nil, fmt.Errorf("unrecognized signature list type: %v", azl.Type)
 		}
-
-		for _, data := range azl.Value {
-			l.Signatures = append(l.Signatures, &efi.SignatureData{Owner: msOwnerGuid, Data: data})
-		}
-
-		out = append(out, l)
 	}
 
 	return out, nil

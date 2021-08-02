@@ -53,7 +53,7 @@ type options struct {
 
 var (
 	opts   options
-	parser = flags.NewParser(&opts, flags.HelpFlag | flags.PassDoubleDash)
+	parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 )
 
 func unmount(path string) error {

@@ -36,7 +36,7 @@ type azSuite struct{}
 
 var _ = Suite(&azSuite{})
 
-func (s *azSuite) TestNewEnvironmentFromAzDiskProfile(c *C) {
+func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 	f, err := os.Open("testdata/disk.json")
 	c.Assert(err, IsNil)
 
@@ -92,4 +92,12 @@ func (s *azSuite) TestNewEnvironmentFromAzDiskProfile(c *C) {
 	c.Check(log.Events[5], isSeparatorEvent, 7, tcglog.SeparatorEventNormalValue)
 	c.Check(log.Events[6], isEFIActionEvent, 4, tcglog.EFICallingEFIApplicationEvent)
 	c.Check(log.Events[7], isSeparatorEvent, 4, tcglog.SeparatorEventNormalValue)
+}
+
+func (s *azSuite) TestNewEnvironmentFromAzDiskProfile1(c *C) {
+	s.testNewEnvironmentFromAzDiskProfile(c, "testdata/disk.json")
+}
+
+func (s *azSuite) TestNewEnvironmentFromAzDiskProfile2(c *C) {
+	s.testNewEnvironmentFromAzDiskProfile(c, "testdata/disk2.json")
 }
