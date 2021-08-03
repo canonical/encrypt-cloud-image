@@ -203,6 +203,19 @@ func computePCRProtectionProfile(esp string, opts *deployOptions, env secboot_ef
 	}
 
 	log.Debugln("PCR profile:", pcrProfile)
+	pcrValues, err := pcrProfile.ComputePCRValues(nil)
+	if err != nil {
+		return nil, xerrors.Errorf("cannot compute PCR values: %w", err)
+	}
+	log.Infoln("PCR values:", pcrValues)
+	for i, values := range pcrValues {
+		log.Infof(" branch %d:\n", i)
+		for alg := range values {
+			for pcr := range values[alg] {
+				log.Infof("  PCR%d,%v: %x\n", pcr, alg, values[alg][pcr])
+			}
+		}
+	}
 	pcrs, digests, err := pcrProfile.ComputePCRDigests(nil, tpm2.HashAlgorithmSHA256)
 	if err != nil {
 		return nil, xerrors.Errorf("cannot compute PCR digests: %w", err)
