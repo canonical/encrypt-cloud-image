@@ -13,7 +13,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/mvo5/goconfigparser v0.0.0-20201015074339-50f22f44deb5 // indirect
 	github.com/sirupsen/logrus v1.8.1
-	github.com/snapcore/secboot v0.0.0-20210511160445-01674777acc7
+	github.com/snapcore/secboot v0.0.0-20210803110231-18a084091a61
 	github.com/snapcore/snapd v0.0.0-20210424120237-b1e9734ba1e3
 	github.com/snapcore/squashfuse v0.0.0-20171220165323-319f6d41a041 // indirect
 	golang.org/x/crypto v0.0.0-20210506145944-38f3c27a63bf // indirect
@@ -25,5 +25,3 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	maze.io/x/crypto v0.0.0-20190131090603-9b94c9afe066 // indirect
 )
-
-replace github.com/snapcore/secboot => github.com/chrisccoulson/secboot v0.0.0-20210519175135-f4900acf2d52

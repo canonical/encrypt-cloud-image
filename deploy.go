@@ -33,8 +33,8 @@ import (
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
-	"github.com/snapcore/secboot"
 	secboot_efi "github.com/snapcore/secboot/efi"
+	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
 
 	"golang.org/x/xerrors"
 
@@ -150,9 +150,9 @@ func readPublicArea(path string) (*tpm2.Public, error) {
 	return pub, nil
 }
 
-func computePCRProtectionProfile(esp string, opts *deployOptions, env secboot_efi.HostEnvironment) (*secboot.PCRProtectionProfile, error) {
+func computePCRProtectionProfile(esp string, opts *deployOptions, env secboot_efi.HostEnvironment) (*secboot_tpm2.PCRProtectionProfile, error) {
 	log.Infoln("computing PCR protection profile")
-	pcrProfile := secboot.NewPCRProtectionProfile()
+	pcrProfile := secboot_tpm2.NewPCRProtectionProfile()
 
 	loadSequences := []*secboot_efi.ImageLoadEvent{
 		{
@@ -383,10 +383,10 @@ func deployImage(opts *deployOptions) error {
 	}
 
 	log.Infoln("creating importable sealed key object")
-	params := secboot.KeyCreationParams{
+	params := secboot_tpm2.KeyCreationParams{
 		PCRProfile:             pcrProfile,
 		PCRPolicyCounterHandle: tpm2.HandleNull}
-	if _, err := secboot.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(keyDir, "cloudimg-rootfs.sealed-key"), &params); err != nil {
+	if _, err := secboot_tpm2.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(keyDir, "cloudimg-rootfs.sealed-key"), &params); err != nil {
 		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
 	}
 

@@ -8,8 +8,6 @@ github.com/canonical/go-tpm2 v0.0.0-20210510125435-18c568a02362 h1:bxid70AuMTiJM
 github.com/canonical/go-tpm2 v0.0.0-20210510125435-18c568a02362/go.mod h1:vG41hdbBjV4+/fkubTT1ENBBqSkLwLr7mCeW9Y6kpZY=
 github.com/canonical/tcglog-parser v0.0.0-20210511163612-0db968597673 h1:9jaPvc+rxPpY4pzoVGVDp311erXS+pBdK4rdYE6vjjY=
 github.com/canonical/tcglog-parser v0.0.0-20210511163612-0db968597673/go.mod h1:QoW2apR2tBl6T/4czdND/EHjL1Ia9cCmQnIj9Xe0Kt8=
-github.com/chrisccoulson/secboot v0.0.0-20210519175135-f4900acf2d52 h1:esiyZHoYyl3tkjIb4E+wmQCIT6/zBr3/ox4mX/VeULM=
-github.com/chrisccoulson/secboot v0.0.0-20210519175135-f4900acf2d52/go.mod h1:vKHFQz9D8LnyQDu+/IO7AUPQGsWUx1fcviAtwvEZyuo=
 github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf h1:iW4rZ826su+pqaw19uhpSCzhj44qo35pNgKFGqzDKkU=
 github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf/go.mod h1:F5haX7vjVVG0kc13fIWeqUViNPyEJxv/OmvnBo0Yme4=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
@@ -41,6 +39,8 @@ github.com/sirupsen/logrus v1.8.1 h1:dJKuHgqk1NNQlqoA6BTlM1Wf9DOH3NBjQyu0h9+AZZE
 github.com/sirupsen/logrus v1.8.1/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
 github.com/snapcore/go-gettext v0.0.0-20191107141714-82bbea49e785 h1:PaunR+BhraKSLxt2awQ42zofkP+NKh/VjQ0PjIMk/y4=
 github.com/snapcore/go-gettext v0.0.0-20191107141714-82bbea49e785/go.mod h1:D3SsWAXK7wCCBZu+Vk5hc1EuKj/L3XN1puEMXTU4LrQ=
+github.com/snapcore/secboot v0.0.0-20210803110231-18a084091a61 h1:gf7jEqDWMiOk6ClZBnS6Zz4WEMUbAF+3e2Hh2wb40SA=
+github.com/snapcore/secboot v0.0.0-20210803110231-18a084091a61/go.mod h1:72paVOkm4sJugXt+v9ItmnjXgO921D8xqsbH2OekouY=
 github.com/snapcore/snapd v0.0.0-20201005140838-501d14ac146e/go.mod h1:3xrn7QDDKymcE5VO2rgWEQ5ZAUGb9htfwlXnoel6Io8=
 github.com/snapcore/snapd v0.0.0-20210424120237-b1e9734ba1e3 h1:Xfs8mTynHIP9zECI8jNhih8tD4Xw4t73K5j142lhYHE=
 github.com/snapcore/snapd v0.0.0-20210424120237-b1e9734ba1e3/go.mod h1:3xrn7QDDKymcE5VO2rgWEQ5ZAUGb9htfwlXnoel6Io8=
