@@ -51,17 +51,46 @@ type deployOptions struct {
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 	UefiConfig    string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
 
-	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
+	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
-	Positional struct {
-		Image string
-	} `positional-args:"true" description:"Image path" equired:"true"`
+	InputVHD	      string `short:"i" long:"image" description:"Path to the image"`
+	QemuDevice	      string `long:"qemu-device" description:"Path to the qemu-device"`
+	WorkingDir	      string `long:"working-dir" description:"Path to the working-dir"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
-	return deployImage(o)
+	if o.StandardSRKTemplate && o.SRKTemplateUniqueData != "" {
+		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
+	}
+
+	if o.AzDiskProfile != "" && o.UefiConfig != "" {
+		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
+	}
+
+	inplaceDeployment := false
+	if o.WorkingDir != "" && o.QemuDevice != "" {
+		if o.InputVHD != ""{
+			return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or option for input-vhd but not both")
+		}
+		inplaceDeployment = true
+	} else if o.WorkingDir != "" {
+		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
+	}else if o.QemuDevice != "" {
+		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
+	}else if o.InputVHD == "" {
+		return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or input-vhd, none provided")
+	}
+
+	if inplaceDeployment == true{
+		if _, err := os.Stat(o.WorkingDir); os.IsNotExist(err) {
+			return xerrors.Errorf("Folder does not exist %s", o.WorkingDir)
+		}
+		return deployImageInplace(o)
+	} else {
+		return deployImage(o)
+	}
 }
 
 func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
@@ -272,7 +301,7 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 	return nil, nil
 }
 
-func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, removeToken func() error, err error) {
+func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, removeToken func() error, err error){
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range partitions {
@@ -316,52 +345,36 @@ func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte,
 	return nil, nil, errors.New("no value LUKS2 container found")
 }
 
-func deployImage(opts *deployOptions) error {
-	if opts.StandardSRKTemplate && opts.SRKTemplateUniqueData != "" {
-		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
-	}
-
-	if opts.AzDiskProfile != "" && opts.UefiConfig != "" {
-		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
-	}
-
-	workingDir, cleanupWorkingDir, err := mkTempDir("")
+func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error{
+	partitions, err := gpt.ReadPartitionTable(qemuDevice)
 	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
+		return xerrors.Errorf("cannot read partition table from %s: %w", qemuDevice, err)
 	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
+	log.Debugln("partition table for", qemuDevice, ":", partitions)
 
-	nbdConn, disconnectNbd, err := connectNbd(opts.Positional.Image)
-	if err != nil {
-		return xerrors.Errorf("cannot connect %s: %w", opts.Positional.Image, err)
-	}
-	defer disconnectNbd()
-	log.Infoln("connected", opts.Positional.Image, "to", nbdConn.DevPath())
-
-	partitions, err := gpt.ReadPartitionTable(nbdConn.DevPath())
-	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", nbdConn.DevPath(), err)
-	}
-	log.Debugln("partition table for", nbdConn.DevPath(), ":", partitions)
-
-	key, removeToken, err := readKeyFromImage(nbdConn.DevPath(), partitions)
+	key, removeToken, err := readKeyFromImage(qemuDevice, partitions)
 	if err != nil {
 		return xerrors.Errorf("cannot read key from LUKS2 container: %w", err)
 	}
 
 	esp := partitions.FindByPartitionType(espGUID)
 	if esp == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, nbdConn.DevPath())
+		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, qemuDevice)
 	}
-	log.Debugln("ESP on", nbdConn.DevPath(), ":", esp)
-	espDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), esp.Index)
+	log.Debugln("ESP on", qemuDevice, ":", esp)
+	espDevPath := fmt.Sprintf("%sp%d", qemuDevice, esp.Index)
 	log.Infoln("device node for ESP:", espDevPath)
 
 	espPath := filepath.Join(workingDir, "esp")
 	if err := os.Mkdir(espPath, 0700); err != nil {
 		return xerrors.Errorf("cannot create directory to mount ESP: %w", err)
 	}
+
+	defer func() {
+		if err := os.Remove(espPath); err != nil {
+			log.WithError(err).Warningln("cannot remove path %s", espPath)
+		}
+	}()
 
 	log.Infoln("mounting ESP to", espPath)
 	unmountEsp, err := mount(espDevPath, espPath, "vfat")
@@ -411,6 +424,37 @@ func deployImage(opts *deployOptions) error {
 
 	if err := removeToken(); err != nil {
 		return xerrors.Errorf("cannot remove cleartext token from LUKS2 container: %w", err)
+	}
+
+	return nil
+
+}
+
+func deployImageInplace(opts *deployOptions) error {
+	if err :=deployImageHelper(opts, opts.WorkingDir, opts.QemuDevice); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s %s", opts.WorkingDir, opts.QemuDevice)
+	}
+
+	return nil
+}
+
+func deployImage(opts *deployOptions) error {
+	workingDir, cleanupWorkingDir, err := mkTempDir("")
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
+	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
+
+	nbdConn, disconnectNbd, err := connectNbd(opts.InputVHD)
+	if err != nil {
+		return xerrors.Errorf("cannot connect %s: %w", opts.InputVHD, err)
+	}
+	defer disconnectNbd()
+	log.Infoln("connected", opts.InputVHD, "to", nbdConn.DevPath())
+
+	if err := deployImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
+		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.InputVHD)
 	}
 
 	return nil
