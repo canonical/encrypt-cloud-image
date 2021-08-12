@@ -64,20 +64,20 @@ type encryptOptions struct {
 
 func (o *encryptOptions) Execute(_ []string) error {
 	inplaceEncryption := false
-	if o.WorkingDir != "" && o.QemuDevice != ""{
-		if o.Output != "" || o.InputVHD != ""{
+	if o.WorkingDir != "" && o.QemuDevice != "" {
+		if o.Output != "" || o.InputVHD != "" {
 			return xerrors.Errorf("Either provide options for inplace encryption ie working-dir and qemu-device or option for external encryption ie output and input-vhd but not both")
 		}
 		inplaceEncryption = true
 	} else if o.WorkingDir != "" {
 		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place encryption")
-	}else if o.QemuDevice != "" {
+	} else if o.QemuDevice != "" {
 		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place encryption")
-	}else if o.Output == "" || o.InputVHD == "" {
+	} else if o.Output == "" || o.InputVHD == "" {
 		return xerrors.Errorf("Either provide options for inplace encryption ie working-dir and qemu-device or option for external encryption ie output and input-vhd, none provided")
 	}
 
-	if inplaceEncryption == true{
+	if inplaceEncryption == true {
 		if _, err := os.Stat(o.WorkingDir); os.IsNotExist(err) {
 			return xerrors.Errorf("Folder does not exist %s", o.WorkingDir)
 		}
@@ -176,7 +176,7 @@ func encryptExtDevice(path string) error {
 		return xerrors.Errorf("cannot shrink filesystem: %w", err)
 	}
 
-	var key [16]byte
+	var key [32]byte
 	if _, err := rand.Read(key[:]); err != nil {
 		return xerrors.Errorf("cannot obtain primary unlock key: %w", err)
 	}
@@ -241,7 +241,6 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 			log.WithError(err).Warningln("cannot remove path %s", mountPath)
 		}
 	}()
-
 
 	log.Infoln("mounting root filesystem to", mountPath)
 	unmount, err := mount(path, mountPath, "ext4")
@@ -386,7 +385,7 @@ func copyKernelToESP(workingDir, devPath, src string) error {
 	return nil
 }
 
-func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) error{
+func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) error {
 
 	partitions, err := gpt.ReadPartitionTable(devicePath)
 	if err != nil {

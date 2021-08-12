@@ -55,9 +55,9 @@ type deployOptions struct {
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
-	InputVHD	      string `short:"i" long:"image" description:"Path to the image"`
-	QemuDevice	      string `long:"qemu-device" description:"Path to the qemu-device"`
-	WorkingDir	      string `long:"working-dir" description:"Path to the working-dir"`
+	InputVHD   string `short:"i" long:"image" description:"Path to the image"`
+	QemuDevice string `long:"qemu-device" description:"Path to the qemu-device"`
+	WorkingDir string `long:"working-dir" description:"Path to the working-dir"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
@@ -71,19 +71,19 @@ func (o *deployOptions) Execute(_ []string) error {
 
 	inplaceDeployment := false
 	if o.WorkingDir != "" && o.QemuDevice != "" {
-		if o.InputVHD != ""{
+		if o.InputVHD != "" {
 			return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or option for input-vhd but not both")
 		}
 		inplaceDeployment = true
 	} else if o.WorkingDir != "" {
 		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
-	}else if o.QemuDevice != "" {
+	} else if o.QemuDevice != "" {
 		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
-	}else if o.InputVHD == "" {
+	} else if o.InputVHD == "" {
 		return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or input-vhd, none provided")
 	}
 
-	if inplaceDeployment == true{
+	if inplaceDeployment == true {
 		if _, err := os.Stat(o.WorkingDir); os.IsNotExist(err) {
 			return xerrors.Errorf("Folder does not exist %s", o.WorkingDir)
 		}
@@ -301,7 +301,7 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 	return nil, nil
 }
 
-func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, removeToken func() error, err error){
+func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, removeToken func() error, err error) {
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range partitions {
@@ -345,7 +345,7 @@ func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte,
 	return nil, nil, errors.New("no value LUKS2 container found")
 }
 
-func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error{
+func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error {
 	partitions, err := gpt.ReadPartitionTable(qemuDevice)
 	if err != nil {
 		return xerrors.Errorf("cannot read partition table from %s: %w", qemuDevice, err)
@@ -431,7 +431,7 @@ func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error
 }
 
 func deployImageInplace(opts *deployOptions) error {
-	if err :=deployImageHelper(opts, opts.WorkingDir, opts.QemuDevice); err != nil {
+	if err := deployImageHelper(opts, opts.WorkingDir, opts.QemuDevice); err != nil {
 		return xerrors.Errorf("Encrypting inplace failed with %s %s", opts.WorkingDir, opts.QemuDevice)
 	}
 
