@@ -152,7 +152,9 @@ func encryptExtDevice(path string) error {
 		return xerrors.Errorf("cannot shrink filesystem: %w", err)
 	}
 
-	var key [32]byte
+	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
+	// so with two keys we need to keep key size at 16 each.
+	var key [16]byte
 	if _, err := rand.Read(key[:]); err != nil {
 		return xerrors.Errorf("cannot obtain primary unlock key: %w", err)
 	}
