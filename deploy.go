@@ -69,17 +69,10 @@ func (o *deployOptions) Execute(_ []string) error {
 		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
 	}
 
-	workingDir, cleanupWorkingDir, err := mkTempDir("")
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
-
 	if strings.HasPrefix(o.Positional.Input, "/dev/") {
-		return deployImageInplace(o, workingDir)
+		return deployQemuDevice(o)
 	} else {
-		return deployImage(o, workingDir)
+		return deployImage(o)
 	}
 }
 
@@ -335,7 +328,13 @@ func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte,
 	return nil, nil, errors.New("no value LUKS2 container found")
 }
 
-func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error {
+func deployImageHelper(opts *deployOptions, qemuDevice string) error {
+	workingDir, cleanupWorkingDir, err := mkTempDir("")
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
+	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
 	partitions, err := gpt.ReadPartitionTable(qemuDevice)
 	if err != nil {
 		return xerrors.Errorf("cannot read partition table from %s: %w", qemuDevice, err)
@@ -420,15 +419,15 @@ func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error
 
 }
 
-func deployImageInplace(opts *deployOptions, workingDir string) error {
-	if err := deployImageHelper(opts, workingDir, opts.Positional.Input); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, opts.Positional.Input)
+func deployQemuDevice(opts *deployOptions) error {
+	if err := deployImageHelper(opts, opts.Positional.Input); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s", opts.Positional.Input)
 	}
 
 	return nil
 }
 
-func deployImage(opts *deployOptions, workingDir string) error {
+func deployImage(opts *deployOptions) error {
 	nbdConn, disconnectNbd, err := connectNbd(opts.Positional.Input)
 	if err != nil {
 		return xerrors.Errorf("cannot connect %s: %w", opts.Positional.Input, err)
@@ -436,7 +435,7 @@ func deployImage(opts *deployOptions, workingDir string) error {
 	defer disconnectNbd()
 	log.Infoln("connected", opts.Positional.Input, "to", nbdConn.DevPath())
 
-	if err := deployImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
+	if err := deployImageHelper(opts, nbdConn.DevPath()); err != nil {
 		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.Positional.Input)
 	}
 
