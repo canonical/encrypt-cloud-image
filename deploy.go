@@ -26,15 +26,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
 	secboot_efi "github.com/snapcore/secboot/efi"
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/xerrors"
 
@@ -55,9 +55,9 @@ type deployOptions struct {
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
-	InputVHD   string `short:"i" long:"image" description:"Path to the image"`
-	QemuDevice string `long:"qemu-device" description:"Path to the qemu-device"`
-	WorkingDir string `long:"working-dir" description:"Path to the working-dir"`
+	Positional struct {
+		Input string
+	} `positional-args:"true" description:"Image path" required:"true"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
@@ -69,27 +69,17 @@ func (o *deployOptions) Execute(_ []string) error {
 		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
 	}
 
-	inplaceDeployment := false
-	if o.WorkingDir != "" && o.QemuDevice != "" {
-		if o.InputVHD != "" {
-			return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or option for input-vhd but not both")
-		}
-		inplaceDeployment = true
-	} else if o.WorkingDir != "" {
-		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
-	} else if o.QemuDevice != "" {
-		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place deployment")
-	} else if o.InputVHD == "" {
-		return xerrors.Errorf("Either provide options for inplace deployment ie working-dir and qemu-device or input-vhd, none provided")
+	workingDir, cleanupWorkingDir, err := mkTempDir("")
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
 	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
 
-	if inplaceDeployment == true {
-		if _, err := os.Stat(o.WorkingDir); os.IsNotExist(err) {
-			return xerrors.Errorf("Folder does not exist %s", o.WorkingDir)
-		}
-		return deployImageInplace(o)
+	if strings.HasPrefix(o.Positional.Input, "/dev/") {
+		return deployImageInplace(o, workingDir)
 	} else {
-		return deployImage(o)
+		return deployImage(o, workingDir)
 	}
 }
 
@@ -430,31 +420,24 @@ func deployImageHelper(opts *deployOptions, workingDir, qemuDevice string) error
 
 }
 
-func deployImageInplace(opts *deployOptions) error {
-	if err := deployImageHelper(opts, opts.WorkingDir, opts.QemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s", opts.WorkingDir, opts.QemuDevice)
+func deployImageInplace(opts *deployOptions, workingDir string) error {
+	if err := deployImageHelper(opts, workingDir, opts.Positional.Input); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, opts.Positional.Input)
 	}
 
 	return nil
 }
 
-func deployImage(opts *deployOptions) error {
-	workingDir, cleanupWorkingDir, err := mkTempDir("")
+func deployImage(opts *deployOptions, workingDir string) error {
+	nbdConn, disconnectNbd, err := connectNbd(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
-
-	nbdConn, disconnectNbd, err := connectNbd(opts.InputVHD)
-	if err != nil {
-		return xerrors.Errorf("cannot connect %s: %w", opts.InputVHD, err)
+		return xerrors.Errorf("cannot connect %s: %w", opts.Positional.Input, err)
 	}
 	defer disconnectNbd()
-	log.Infoln("connected", opts.InputVHD, "to", nbdConn.DevPath())
+	log.Infoln("connected", opts.Positional.Input, "to", nbdConn.DevPath())
 
 	if err := deployImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.InputVHD)
+		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.Positional.Input)
 	}
 
 	return nil

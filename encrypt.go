@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -51,39 +52,50 @@ const (
 type encryptOptions struct {
 	Output string `short:"o" long:"output" description:"Output image path"`
 
-	WorkingDir string `short:"w" long:"working-dir" description:"Working Directory provided for inplace encryption "`
-	QemuDevice string `short:"d" long:"qemu-device" description:"Qemu Device Provided for inplace encryption "`
-
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 
 	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
-	InputVHD string `short:"i" long:"input" description:"Input image path"`
+	Positional struct {
+		Input string
+	} `positional-args:"true" description:"Input image path" required:"true"`
 }
 
 func (o *encryptOptions) Execute(_ []string) error {
 	inplaceEncryption := false
-	if o.WorkingDir != "" && o.QemuDevice != "" {
-		if o.Output != "" || o.InputVHD != "" {
-			return xerrors.Errorf("Either provide options for inplace encryption ie working-dir and qemu-device or option for external encryption ie output and input-vhd but not both")
+	var baseDir string
+
+	if validImageExt(o.Positional.Input) || filepath.Ext(o.Positional.Input) == ".zip" {
+		if o.Output == "" {
+			return xerrors.Errorf("Output argument must be provided when qemu device for inplace encryption is not provided")
+		}
+	} else if strings.HasPrefix(o.Positional.Input, "/dev/") {
+		if o.Output != "" {
+			return xerrors.Errorf("Output argument must not be provided when qemu device for inplace encryption is provided")
 		}
 		inplaceEncryption = true
-	} else if o.WorkingDir != "" {
-		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place encryption")
-	} else if o.QemuDevice != "" {
-		return xerrors.Errorf("Both working-dir and qemu-device options need to be provided for in place encryption")
-	} else if o.Output == "" || o.InputVHD == "" {
-		return xerrors.Errorf("Either provide options for inplace encryption ie working-dir and qemu-device or option for external encryption ie output and input-vhd, none provided")
+	} else {
+		return xerrors.Errorf("Neither zip/image specified nor qemu device specified as input. Failing. %s", o.Positional.Input)
 	}
 
-	if inplaceEncryption == true {
-		if _, err := os.Stat(o.WorkingDir); os.IsNotExist(err) {
-			return xerrors.Errorf("Folder does not exist %s", o.WorkingDir)
-		}
-		return encryptImageInplace(o)
+	if o.Output != "" {
+		baseDir = filepath.Dir(o.Output)
 	} else {
-		return encryptImage(o)
+		baseDir = ""
+	}
+
+	workingDir, cleanupWorkingDir, err := mkTempDir(baseDir)
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
+	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
+
+	if inplaceEncryption == true {
+		return encryptImageInplace(o, workingDir)
+	} else {
+		return encryptImage(o, workingDir)
 	}
 
 	return nil
@@ -434,24 +446,17 @@ func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) err
 	return nil
 }
 
-func encryptImageInplace(opts *encryptOptions) (err error) {
+func encryptImageInplace(opts *encryptOptions, workingDir string) (err error) {
 
-	if err := encryptImageHelper(opts, opts.WorkingDir, opts.QemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s", opts.WorkingDir, opts.QemuDevice)
+	if err := encryptImageHelper(opts, workingDir, opts.Positional.Input); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, opts.Positional.Input)
 	}
 
 	return nil
 }
 
-func encryptImage(opts *encryptOptions) (err error) {
-	workingDir, cleanupWorkingDir, err := mkTempDir(filepath.Dir(opts.Output))
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
-
-	nbdConn, disconnectNbd, err := connectImage(workingDir, opts.InputVHD, opts)
+func encryptImage(opts *encryptOptions, workingDir string) (err error) {
+	nbdConn, disconnectNbd, err := connectImage(workingDir, opts.Positional.Input, opts)
 	if err != nil {
 		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
 	}
@@ -466,7 +471,7 @@ func encryptImage(opts *encryptOptions) (err error) {
 	defer disconnectNbd()
 
 	if err := encryptImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.InputVHD)
+		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.Positional.Input)
 	}
 
 	return nil
