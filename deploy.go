@@ -70,7 +70,7 @@ func (o *deployOptions) Execute(_ []string) error {
 	}
 
 	if strings.HasPrefix(o.Positional.Input, "/dev/") {
-		return deployQemuDevice(o)
+		return deployQemuDevice(o, o.Positional.Input)
 	} else {
 		return deployImage(o)
 	}
@@ -419,9 +419,9 @@ func deployImageHelper(opts *deployOptions, qemuDevice string) error {
 
 }
 
-func deployQemuDevice(opts *deployOptions) error {
-	if err := deployImageHelper(opts, opts.Positional.Input); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s", opts.Positional.Input)
+func deployQemuDevice(opts *deployOptions, qemuDevice string) error {
+	if err := deployImageHelper(opts, qemuDevice); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s", qemuDevice)
 	}
 
 	return nil

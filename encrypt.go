@@ -93,7 +93,7 @@ func (o *encryptOptions) Execute(_ []string) error {
 	log.Infoln("temporary working directory:", workingDir)
 
 	if inplaceEncryption == true {
-		return encryptImageInplace(o, workingDir)
+		return encryptQemuDevice(o, workingDir, o.Positional.Input)
 	} else {
 		return encryptImage(o, workingDir)
 	}
@@ -446,10 +446,10 @@ func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) err
 	return nil
 }
 
-func encryptImageInplace(opts *encryptOptions, workingDir string) (err error) {
+func encryptQemuDevice(opts *encryptOptions, workingDir, qemuDevice string) (err error) {
 
-	if err := encryptImageHelper(opts, workingDir, opts.Positional.Input); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, opts.Positional.Input)
+	if err := encryptImageHelper(opts, workingDir, qemuDevice); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, qemuDevice)
 	}
 
 	return nil
