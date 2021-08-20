@@ -95,7 +95,7 @@ func (o *encryptOptions) Execute(_ []string) error {
 	if inplaceEncryption == true {
 		return encryptQemuDevice(o, workingDir, o.Positional.Input)
 	} else {
-		return encryptImage(o, workingDir)
+		return encryptImage(o, workingDir, o.Positional.Input)
 	}
 
 	return nil
@@ -455,8 +455,8 @@ func encryptQemuDevice(opts *encryptOptions, workingDir, qemuDevice string) (err
 	return nil
 }
 
-func encryptImage(opts *encryptOptions, workingDir string) (err error) {
-	nbdConn, disconnectNbd, err := connectImage(workingDir, opts.Positional.Input, opts)
+func encryptImage(opts *encryptOptions, workingDir, imagePath string) (err error) {
+	nbdConn, disconnectNbd, err := connectImage(workingDir, imagePath, opts)
 	if err != nil {
 		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
 	}
@@ -471,7 +471,7 @@ func encryptImage(opts *encryptOptions, workingDir string) (err error) {
 	defer disconnectNbd()
 
 	if err := encryptImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.Positional.Input)
+		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), imagePath)
 	}
 
 	return nil

@@ -72,7 +72,7 @@ func (o *deployOptions) Execute(_ []string) error {
 	if strings.HasPrefix(o.Positional.Input, "/dev/") {
 		return deployQemuDevice(o, o.Positional.Input)
 	} else {
-		return deployImage(o)
+		return deployImage(o, o.Positional.Input)
 	}
 }
 
@@ -427,16 +427,16 @@ func deployQemuDevice(opts *deployOptions, qemuDevice string) error {
 	return nil
 }
 
-func deployImage(opts *deployOptions) error {
-	nbdConn, disconnectNbd, err := connectNbd(opts.Positional.Input)
+func deployImage(opts *deployOptions, imagePath string) error {
+	nbdConn, disconnectNbd, err := connectNbd(imagePath)
 	if err != nil {
 		return xerrors.Errorf("cannot connect %s: %w", opts.Positional.Input, err)
 	}
 	defer disconnectNbd()
-	log.Infoln("connected", opts.Positional.Input, "to", nbdConn.DevPath())
+	log.Infoln("connected", imagePath, "to", nbdConn.DevPath())
 
-	if err := deployImageHelper(opts, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), opts.Positional.Input)
+	if err := deployImageHelper(opts, imagePath); err != nil {
+		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), imagePath)
 	}
 
 	return nil
