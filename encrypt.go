@@ -58,8 +58,8 @@ type encryptOptions struct {
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
 	Positional struct {
-		Input string
-	} `positional-args:"true" positional-arg-name:"Input zip/image or qemu device" required:"true"`
+		Input string `positional-arg-name:"Image zip/Image path/Qemu device"`
+	} `positional-args:"true" required:"true"`
 }
 
 func (o *encryptOptions) Execute(_ []string) error {

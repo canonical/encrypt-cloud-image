@@ -56,8 +56,8 @@ type deployOptions struct {
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
 	Positional struct {
-		Input string
-	} `positional-args:"true" postitional-arg-name:"Image path/qemu device path" required:"true"`
+		Input string `positional-arg-name:"Image path/Qemu device"`
+	} `positional-args:"true" required:"true"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
