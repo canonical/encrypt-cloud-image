@@ -59,7 +59,7 @@ type encryptOptions struct {
 
 	Positional struct {
 		Input string
-	} `positional-args:"true" description:"Input image path" required:"true"`
+	} `positional-args:"true" positional-arg-name:"Input zip/image or qemu device" required:"true"`
 }
 
 func (o *encryptOptions) Execute(_ []string) error {
@@ -68,11 +68,11 @@ func (o *encryptOptions) Execute(_ []string) error {
 
 	if validImageExt(o.Positional.Input) || filepath.Ext(o.Positional.Input) == ".zip" {
 		if o.Output == "" {
-			return xerrors.Errorf("Output argument must be provided when qemu device for inplace encryption is not provided")
+			return xerrors.New("Output argument must be provided when qemu device for inplace encryption is not provided")
 		}
 	} else if strings.HasPrefix(o.Positional.Input, "/dev/") {
 		if o.Output != "" {
-			return xerrors.Errorf("Output argument must not be provided when qemu device for inplace encryption is provided")
+			return xerrors.New("Output argument must not be provided when qemu device for inplace encryption is provided")
 		}
 		inplaceEncryption = true
 	} else {
@@ -248,13 +248,9 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 	if err := os.Mkdir(mountPath, 0700); err != nil {
 		return xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
 	}
-	defer func() {
-		if err := os.Remove(mountPath); err != nil {
-			log.WithError(err).Warningln("cannot remove path %s", mountPath)
-		}
-	}()
 
 	log.Infoln("mounting root filesystem to", mountPath)
+
 	unmount, err := mount(path, mountPath, "ext4")
 	if err != nil {
 		return xerrors.Errorf("cannot mount rootfs: %w", err)
@@ -447,9 +443,8 @@ func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) err
 }
 
 func encryptQemuDevice(opts *encryptOptions, workingDir, qemuDevice string) (err error) {
-
 	if err := encryptImageHelper(opts, workingDir, qemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s", workingDir, qemuDevice)
+		return xerrors.Errorf("Encrypting inplace failed with %s %s: %w", workingDir, qemuDevice, err)
 	}
 
 	return nil
@@ -471,7 +466,7 @@ func encryptImage(opts *encryptOptions, workingDir, imagePath string) (err error
 	defer disconnectNbd()
 
 	if err := encryptImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), imagePath)
+		return xerrors.Errorf("cannot encrypt image device %s for %s: %w", nbdConn.DevPath(), imagePath, err)
 	}
 
 	return nil

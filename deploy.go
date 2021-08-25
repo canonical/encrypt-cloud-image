@@ -57,7 +57,7 @@ type deployOptions struct {
 
 	Positional struct {
 		Input string
-	} `positional-args:"true" description:"Image path" required:"true"`
+	} `positional-args:"true" postitional-arg-name:"Image path/qemu device path" required:"true"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
@@ -359,12 +359,6 @@ func deployImageHelper(opts *deployOptions, qemuDevice string) error {
 		return xerrors.Errorf("cannot create directory to mount ESP: %w", err)
 	}
 
-	defer func() {
-		if err := os.Remove(espPath); err != nil {
-			log.WithError(err).Warningln("cannot remove path %s", espPath)
-		}
-	}()
-
 	log.Infoln("mounting ESP to", espPath)
 	unmountEsp, err := mount(espDevPath, espPath, "vfat")
 	if err != nil {
@@ -416,12 +410,11 @@ func deployImageHelper(opts *deployOptions, qemuDevice string) error {
 	}
 
 	return nil
-
 }
 
 func deployQemuDevice(opts *deployOptions, qemuDevice string) error {
 	if err := deployImageHelper(opts, qemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s", qemuDevice)
+		return xerrors.Errorf("Encrypting inplace failed with %s: %w", qemuDevice, err)
 	}
 
 	return nil
@@ -436,7 +429,7 @@ func deployImage(opts *deployOptions, imagePath string) error {
 	log.Infoln("connected", imagePath, "to", nbdConn.DevPath())
 
 	if err := deployImageHelper(opts, imagePath); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s", nbdConn.DevPath(), imagePath)
+		return xerrors.Errorf("cannot encrypt image device %s for %s: %w", nbdConn.DevPath(), imagePath, err)
 	}
 
 	return nil
