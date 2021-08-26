@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -49,7 +50,7 @@ const (
 )
 
 type encryptOptions struct {
-	Output string `short:"o" long:"output" description:"Output image path" required:"true"`
+	Output string `short:"o" long:"output" description:"Output image path"`
 
 	KernelEfi string `long:"kernel-efi" description:"Path to kernel.efi for booting"`
 
@@ -57,12 +58,47 @@ type encryptOptions struct {
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
 	Positional struct {
-		Input string
-	} `positional-args:"true" description:"Input image path" equired:"true"`
+		Input string `positional-arg-name:"Image zip/Image path/Qemu device"`
+	} `positional-args:"true" required:"true"`
 }
 
 func (o *encryptOptions) Execute(_ []string) error {
-	return encryptImage(o)
+	inplaceEncryption := false
+	var baseDir string
+
+	if validImageExt(o.Positional.Input) || filepath.Ext(o.Positional.Input) == ".zip" {
+		if o.Output == "" {
+			return xerrors.New("Output argument must be provided when qemu device for inplace encryption is not provided")
+		}
+	} else if strings.HasPrefix(o.Positional.Input, "/dev/") {
+		if o.Output != "" {
+			return xerrors.New("Output argument must not be provided when qemu device for inplace encryption is provided")
+		}
+		inplaceEncryption = true
+	} else {
+		return xerrors.Errorf("Neither zip/image specified nor qemu device specified as input. Failing. %s", o.Positional.Input)
+	}
+
+	if o.Output != "" {
+		baseDir = filepath.Dir(o.Output)
+	} else {
+		baseDir = ""
+	}
+
+	workingDir, cleanupWorkingDir, err := mkTempDir(baseDir)
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
+	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
+
+	if inplaceEncryption == true {
+		return encryptQemuDevice(o, workingDir, o.Positional.Input)
+	} else {
+		return encryptImage(o, workingDir, o.Positional.Input)
+	}
+
+	return nil
 }
 
 func getBlockDeviceSize(path string) (int64, error) {
@@ -216,6 +252,7 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 	}
 
 	log.Infoln("mounting root filesystem to", mountPath)
+
 	unmount, err := mount(path, mountPath, "ext4")
 	if err != nil {
 		return xerrors.Errorf("cannot mount rootfs: %w", err)
@@ -358,15 +395,65 @@ func copyKernelToESP(workingDir, devPath, src string) error {
 	return nil
 }
 
-func encryptImage(opts *encryptOptions) (err error) {
-	workingDir, cleanupWorkingDir, err := mkTempDir(filepath.Dir(opts.Output))
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
+func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) error {
 
-	nbdConn, disconnectNbd, err := connectImage(workingDir, opts.Positional.Input, opts)
+	partitions, err := gpt.ReadPartitionTable(devicePath)
+	if err != nil {
+		return xerrors.Errorf("cannot read partition table from %s: %w", devicePath, err)
+	}
+	log.Debugln("partition table for", devicePath, ":", partitions)
+
+	// XXX: Could there be more than one partition with this type?
+	root := partitions.FindByPartitionType(linuxFilesystemGUID)
+	if root == nil {
+		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, devicePath)
+	}
+	log.Debugln("rootfs partition on", devicePath, ":", root)
+	rootDevPath := fmt.Sprintf("%sp%d", devicePath, root.Index)
+	log.Infoln("device node for rootfs partition:", rootDevPath)
+
+	if err := customizeRootFS(workingDir, rootDevPath, opts); err != nil {
+		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
+	}
+
+	if err := encryptExtDevice(rootDevPath); err != nil {
+		return xerrors.Errorf("cannot encrypt %s: %w", rootDevPath, err)
+	}
+
+	if opts.GrowRoot {
+		if err := growPartition(devicePath, rootDevPath, root.Index); err != nil {
+			return xerrors.Errorf("cannot grow root partition: %w", err)
+		}
+	}
+
+	if opts.KernelEfi != "" {
+		esp := partitions.FindByPartitionType(espGUID)
+		if esp == nil {
+			return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, devicePath)
+		}
+
+		log.Debugln("ESP on", devicePath, ":", esp)
+		espDevPath := fmt.Sprintf("%sp%d", devicePath, esp.Index)
+		log.Infoln("device node for ESP:", espDevPath)
+
+		if err := copyKernelToESP(workingDir, espDevPath, opts.KernelEfi); err != nil {
+			return xerrors.Errorf("cannot copy kernel image to ESP: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func encryptQemuDevice(opts *encryptOptions, workingDir, qemuDevice string) (err error) {
+	if err := encryptImageHelper(opts, workingDir, qemuDevice); err != nil {
+		return xerrors.Errorf("Encrypting inplace failed with %s %s: %w", workingDir, qemuDevice, err)
+	}
+
+	return nil
+}
+
+func encryptImage(opts *encryptOptions, workingDir, imagePath string) (err error) {
+	nbdConn, disconnectNbd, err := connectImage(workingDir, imagePath, opts)
 	if err != nil {
 		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
 	}
@@ -380,48 +467,8 @@ func encryptImage(opts *encryptOptions) (err error) {
 	}()
 	defer disconnectNbd()
 
-	partitions, err := gpt.ReadPartitionTable(nbdConn.DevPath())
-	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", nbdConn.DevPath(), err)
-	}
-	log.Debugln("partition table for", nbdConn.DevPath(), ":", partitions)
-
-	// XXX: Could there be more than one partition with this type?
-	root := partitions.FindByPartitionType(linuxFilesystemGUID)
-	if root == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, nbdConn.DevPath())
-	}
-	log.Debugln("rootfs partition on", nbdConn.DevPath(), ":", root)
-	rootDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), root.Index)
-	log.Infoln("device node for rootfs partition:", rootDevPath)
-
-	if err := customizeRootFS(workingDir, rootDevPath, opts); err != nil {
-		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
-	}
-
-	if err := encryptExtDevice(rootDevPath); err != nil {
-		return xerrors.Errorf("cannot encrypt %s: %w", rootDevPath, err)
-	}
-
-	if opts.GrowRoot {
-		if err := growPartition(nbdConn.DevPath(), rootDevPath, root.Index); err != nil {
-			return xerrors.Errorf("cannot grow root partition: %w", err)
-		}
-	}
-
-	if opts.KernelEfi != "" {
-		esp := partitions.FindByPartitionType(espGUID)
-		if esp == nil {
-			return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, nbdConn.DevPath())
-		}
-
-		log.Debugln("ESP on", nbdConn.DevPath(), ":", esp)
-		espDevPath := fmt.Sprintf("%sp%d", nbdConn.DevPath(), esp.Index)
-		log.Infoln("device node for ESP:", espDevPath)
-
-		if err := copyKernelToESP(workingDir, espDevPath, opts.KernelEfi); err != nil {
-			return xerrors.Errorf("cannot copy kernel image to ESP: %w", err)
-		}
+	if err := encryptImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
+		return xerrors.Errorf("cannot encrypt image device %s for %s: %w", nbdConn.DevPath(), imagePath, err)
 	}
 
 	return nil
