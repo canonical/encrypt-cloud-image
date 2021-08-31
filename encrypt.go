@@ -30,7 +30,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -41,7 +40,6 @@ import (
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
-	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 const (
@@ -58,47 +56,12 @@ type encryptOptions struct {
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
 	Positional struct {
-		Input string `positional-arg-name:"Image zip/Image path/Qemu device"`
+		Input string `positional-arg-name:"Source image path (file or block device)"`
 	} `positional-args:"true" required:"true"`
 }
 
 func (o *encryptOptions) Execute(_ []string) error {
-	inplaceEncryption := false
-	var baseDir string
-
-	if validImageExt(o.Positional.Input) || filepath.Ext(o.Positional.Input) == ".zip" {
-		if o.Output == "" {
-			return xerrors.New("Output argument must be provided when qemu device for inplace encryption is not provided")
-		}
-	} else if strings.HasPrefix(o.Positional.Input, "/dev/") {
-		if o.Output != "" {
-			return xerrors.New("Output argument must not be provided when qemu device for inplace encryption is provided")
-		}
-		inplaceEncryption = true
-	} else {
-		return xerrors.Errorf("Neither zip/image specified nor qemu device specified as input. Failing. %s", o.Positional.Input)
-	}
-
-	if o.Output != "" {
-		baseDir = filepath.Dir(o.Output)
-	} else {
-		baseDir = ""
-	}
-
-	workingDir, cleanupWorkingDir, err := mkTempDir(baseDir)
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
-
-	if inplaceEncryption == true {
-		return encryptQemuDevice(o, workingDir, o.Positional.Input)
-	} else {
-		return encryptImage(o, workingDir, o.Positional.Input)
-	}
-
-	return nil
+	return encryptImage(o)
 }
 
 func getBlockDeviceSize(path string) (int64, error) {
@@ -286,16 +249,6 @@ growpart:
 	return nil
 }
 
-type zipFileReader struct {
-	f *os.File
-	io.ReadCloser
-}
-
-func (r *zipFileReader) Close() error {
-	r.ReadCloser.Close()
-	return r.f.Close()
-}
-
 func validImageExt(ext string) bool {
 	switch ext {
 	case ".img", ".vhd":
@@ -305,70 +258,81 @@ func validImageExt(ext string) bool {
 	}
 }
 
-func openSourceImage(path string) (io.ReadCloser, error) {
-	log.Debugln("opening source image from", path)
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, xerrors.Errorf("cannot open file: %w", err)
-	}
-
+func tryToOpenImageFromZip(src io.ReaderAt, sz int64) (io.ReadCloser, error) {
+	log.Debugln("trying zip")
+	r, err := zip.NewReader(src, sz)
 	switch {
-	case filepath.Ext(path) == ".zip":
-		log.Debugln("detected zip archive")
-		fi, err := f.Stat()
-		if err != nil {
-			return nil, xerrors.Errorf("cannot determine file size: %w", err)
+	case err == zip.ErrFormat:
+		return nil, nil
+	case err != nil:
+		return nil, xerrors.Errorf("cannot read zip: %w", err)
+	}
+	log.Debugln("iterating zip archive files")
+	for _, zf := range r.File {
+		log.Debugln("trying", zf.Name)
+		if !validImageExt(filepath.Ext(zf.Name)) {
+			log.Debugln("...skipping")
+			continue
 		}
-		r, err := zip.NewReader(f, fi.Size())
-		if err != nil {
-			return nil, xerrors.Errorf("cannot create ZIP reader: %w", err)
-		}
-		log.Debugln("iterating zip archive files")
-		for _, zf := range r.File {
-			log.Debugln("trying", zf.Name)
-			if !validImageExt(filepath.Ext(zf.Name)) {
-				log.Debugln("...skipping")
-				continue
-			}
 
-			log.Debugln("...found file with valid extension")
-			rc, err := zf.Open()
-			if err != nil {
-				return nil, xerrors.Errorf("cannot open image in ZIP file: %w", err)
-			}
-			return &zipFileReader{f, rc}, nil
+		log.Debugln("...found file with valid extension")
+		rc, err := zf.Open()
+		if err != nil {
+			return nil, xerrors.Errorf("cannot open image in ZIP file: %w", err)
 		}
-	case validImageExt(filepath.Ext(path)):
-		log.Debugln("detecting unpacked and uncompressed image")
-		return f, nil
+		return rc, nil
 	}
 
 	return nil, errors.New("no appropriate image found")
 }
 
-func connectImage(workingDir, path string, opts *encryptOptions) (*nbd.Connection, func(), error) {
-	srcImg, err := openSourceImage(path)
+func tryToOpenArchivedImage(f *os.File) (r io.ReadCloser, err error) {
+	log.Debugln("trying to find archived image from", f.Name())
+
+	fi, err := f.Stat()
 	if err != nil {
-		return nil, nil, xerrors.Errorf("cannot open source image: %w", err)
+		return nil, xerrors.Errorf("cannot obtain file info: %w", err)
 	}
-	defer func() {
-		if err := srcImg.Close(); err != nil {
-			log.WithError(err).Warningln("cannot close source image")
+
+	r, err = tryToOpenImageFromZip(f, fi.Size())
+	if err != nil {
+		return nil, xerrors.Errorf("cannot find image in zip: %w", err)
+	}
+
+	// TODO: Try other archive formats and compression combinations
+	return r, nil
+}
+
+func prepareWorkingImage(workingDir string, f *os.File, opts *encryptOptions) (string, error) {
+	r, err := tryToOpenArchivedImage(f)
+	switch {
+	case err != nil:
+		return "", xerrors.Errorf("cannot open archived source image: %w", err)
+	case r != nil:
+		// Input file is an archive with a valid image
+		defer func() {
+			if err := r.Close(); err != nil {
+				log.WithError(err).Warningln("cannot close source image")
+			}
+		}()
+		if opts.Output == "" {
+			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
 		}
-	}()
-
-	workingImgPath := filepath.Join(workingDir, filepath.Base(opts.Output))
-	log.Infoln("making copy of source image to", workingImgPath)
-	if err := internal_ioutil.CopyFromReaderToFile(workingImgPath, srcImg); err != nil {
-		return nil, nil, xerrors.Errorf("cannot make working copy of source image: %w", err)
+	case opts.Output != "":
+		// Input file is not an archive and we are not encrypting the source image
+		r = f
+	default:
+		// Input file is not an archive and we are encrypting the source image
+		return "", nil
 	}
 
-	nbdConn, disconnect, err := connectNbd(workingImgPath)
-	if err != nil {
-		return nil, nil, xerrors.Errorf("cannot connect %s: %w", workingImgPath, err)
+	path := filepath.Join(workingDir, filepath.Base(opts.Output))
+	log.Infoln("making copy of source image to", path)
+	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
+		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
 	}
-	log.Infoln("connected", workingImgPath, "to", nbdConn.DevPath())
-	return nbdConn, disconnect, nil
+
+	return path, nil
 }
 
 func copyKernelToESP(workingDir, devPath, src string) error {
@@ -395,8 +359,7 @@ func copyKernelToESP(workingDir, devPath, src string) error {
 	return nil
 }
 
-func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) error {
-
+func encryptImageOnDevice(workingDir, devicePath string, opts *encryptOptions) error {
 	partitions, err := gpt.ReadPartitionTable(devicePath)
 	if err != nil {
 		return xerrors.Errorf("cannot read partition table from %s: %w", devicePath, err)
@@ -444,34 +407,72 @@ func encryptImageHelper(opts *encryptOptions, workingDir, devicePath string) err
 	return nil
 }
 
-func encryptQemuDevice(opts *encryptOptions, workingDir, qemuDevice string) (err error) {
-	if err := encryptImageHelper(opts, workingDir, qemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s %s: %w", workingDir, qemuDevice, err)
+func encryptImageFromFile(workingDir string, f *os.File, opts *encryptOptions) error {
+	path, err := prepareWorkingImage(workingDir, f, opts)
+	switch {
+	case err != nil:
+		return xerrors.Errorf("cannot prepare working image: %w", err)
+	case path != "":
+		// We aren't encrypting the source image
+		defer func() {
+			if err != nil {
+				return
+			}
+			if err := os.Rename(path, opts.Output); err != nil {
+				log.WithError(err).Panicln("cannot move working image to final path")
+			}
+		}()
+	default:
+		// We are encrypting the source image
+		path = f.Name()
 	}
 
-	return nil
-}
-
-func encryptImage(opts *encryptOptions, workingDir, imagePath string) (err error) {
-	nbdConn, disconnectNbd, err := connectImage(workingDir, imagePath, opts)
+	nbdConn, disconnectNbd, err := connectNbd(path)
 	if err != nil {
-		return xerrors.Errorf("cannot connect working image to NBD device: %w", err)
+		return xerrors.Errorf("cannot connect image to NBD device: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			return
-		}
-		if err := os.Rename(nbdConn.SourcePath(), opts.Output); err != nil {
-			log.WithError(err).Panicln("cannot move working image to final path")
-		}
-	}()
+	log.Infoln("connected", path, "to", nbdConn.DevPath())
 	defer disconnectNbd()
 
-	if err := encryptImageHelper(opts, workingDir, nbdConn.DevPath()); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s: %w", nbdConn.DevPath(), imagePath, err)
+	return encryptImageOnDevice(workingDir, nbdConn.DevPath(), opts)
+}
+
+func encryptImage(opts *encryptOptions) error {
+	path := opts.Positional.Input
+
+	f, err := os.Open(path)
+	if err != nil {
+		return xerrors.Errorf("cannot open source file: %w", err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return xerrors.Errorf("cannot obtain source file information: %w", err)
 	}
 
-	return nil
+	if opts.Output != "" && fi.Mode()&os.ModeDevice != 0 {
+		return errors.New("cannot specify --output with a block device")
+	}
+
+	var baseDir string
+	if opts.Output != "" {
+		baseDir = filepath.Dir(opts.Output)
+	}
+	workingDir, cleanupWorkingDir, err := mkTempDir(baseDir)
+	if err != nil {
+		return xerrors.Errorf("cannot create working directory: %w", err)
+	}
+	defer cleanupWorkingDir()
+	log.Infoln("temporary working directory:", workingDir)
+
+	if fi.Mode()&os.ModeDevice != 0 {
+		// Input file is a block device
+		return encryptImageOnDevice(workingDir, path, opts)
+	}
+
+	// Input file is not a block device
+	return encryptImageFromFile(workingDir, f, opts)
 }
 
 func init() {

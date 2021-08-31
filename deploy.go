@@ -34,7 +34,6 @@ import (
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/xerrors"
 
@@ -56,24 +55,12 @@ type deployOptions struct {
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
 	Positional struct {
-		Input string `positional-arg-name:"Image path/Qemu device"`
+		Input string `positional-arg-name:"Source image path (file or block device)"`
 	} `positional-args:"true" required:"true"`
 }
 
 func (o *deployOptions) Execute(_ []string) error {
-	if o.StandardSRKTemplate && o.SRKTemplateUniqueData != "" {
-		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
-	}
-
-	if o.AzDiskProfile != "" && o.UefiConfig != "" {
-		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
-	}
-
-	if strings.HasPrefix(o.Positional.Input, "/dev/") {
-		return deployQemuDevice(o, o.Positional.Input)
-	} else {
-		return deployImage(o, o.Positional.Input)
-	}
+	return deployImage(o)
 }
 
 func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error) {
@@ -328,30 +315,31 @@ func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte,
 	return nil, nil, errors.New("no value LUKS2 container found")
 }
 
-func deployImageHelper(opts *deployOptions, qemuDevice string) error {
+func deployImageOnDevice(devicePath string, opts *deployOptions) error {
 	workingDir, cleanupWorkingDir, err := mkTempDir("")
 	if err != nil {
 		return xerrors.Errorf("cannot create working directory: %w", err)
 	}
 	defer cleanupWorkingDir()
 	log.Infoln("temporary working directory:", workingDir)
-	partitions, err := gpt.ReadPartitionTable(qemuDevice)
-	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", qemuDevice, err)
-	}
-	log.Debugln("partition table for", qemuDevice, ":", partitions)
 
-	key, removeToken, err := readKeyFromImage(qemuDevice, partitions)
+	partitions, err := gpt.ReadPartitionTable(devicePath)
+	if err != nil {
+		return xerrors.Errorf("cannot read partition table from %s: %w", devicePath, err)
+	}
+	log.Debugln("partition table for", devicePath, ":", partitions)
+
+	key, removeToken, err := readKeyFromImage(devicePath, partitions)
 	if err != nil {
 		return xerrors.Errorf("cannot read key from LUKS2 container: %w", err)
 	}
 
 	esp := partitions.FindByPartitionType(espGUID)
 	if esp == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, qemuDevice)
+		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, devicePath)
 	}
-	log.Debugln("ESP on", qemuDevice, ":", esp)
-	espDevPath := fmt.Sprintf("%sp%d", qemuDevice, esp.Index)
+	log.Debugln("ESP on", devicePath, ":", esp)
+	espDevPath := fmt.Sprintf("%sp%d", devicePath, esp.Index)
 	log.Infoln("device node for ESP:", espDevPath)
 
 	espPath := filepath.Join(workingDir, "esp")
@@ -412,27 +400,40 @@ func deployImageHelper(opts *deployOptions, qemuDevice string) error {
 	return nil
 }
 
-func deployQemuDevice(opts *deployOptions, qemuDevice string) error {
-	if err := deployImageHelper(opts, qemuDevice); err != nil {
-		return xerrors.Errorf("Encrypting inplace failed with %s: %w", qemuDevice, err)
-	}
-
-	return nil
-}
-
-func deployImage(opts *deployOptions, imagePath string) error {
-	nbdConn, disconnectNbd, err := connectNbd(imagePath)
+func deployImageFromFile(path string, opts *deployOptions) error {
+	nbdConn, disconnectNbd, err := connectNbd(path)
 	if err != nil {
-		return xerrors.Errorf("cannot connect %s: %w", opts.Positional.Input, err)
+		return xerrors.Errorf("cannot connect %s: %w", path, err)
 	}
 	defer disconnectNbd()
-	log.Infoln("connected", imagePath, "to", nbdConn.DevPath())
+	log.Infoln("connected", path, "to", nbdConn.DevPath())
 
-	if err := deployImageHelper(opts, imagePath); err != nil {
-		return xerrors.Errorf("cannot encrypt image device %s for %s: %w", nbdConn.DevPath(), imagePath, err)
+	return deployImageOnDevice(nbdConn.DevPath(), opts)
+}
+
+func deployImage(opts *deployOptions) error {
+	if opts.StandardSRKTemplate && opts.SRKTemplateUniqueData != "" {
+		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
 	}
 
-	return nil
+	if opts.AzDiskProfile != "" && opts.UefiConfig != "" {
+		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
+	}
+
+	path := opts.Positional.Input
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		return xerrors.Errorf("cannot obtain source file information: %w", err)
+	}
+
+	if fi.Mode()&os.ModeDevice != 0 {
+		// Source file is a block device
+		return deployImageOnDevice(path, opts)
+	}
+
+	// Source file is not a block device
+	return deployImageFromFile(path, opts)
 }
 
 func init() {
