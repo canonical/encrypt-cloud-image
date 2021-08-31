@@ -109,6 +109,10 @@ func runCommand(command flags.Commander, args []string) error {
 
 	log.Debugln("args:", strings.Join(args, " "))
 
+	if err := checkPrerequisites(); err != nil {
+		return err
+	}
+
 	return command.Execute(args)
 }
 
@@ -163,10 +167,6 @@ func configureLogging() {
 
 func run(args []string) (err error) {
 	configureLogging()
-
-	if err := checkPrerequisites(); err != nil {
-		return err
-	}
 
 	parser.CommandHandler = runCommand
 
