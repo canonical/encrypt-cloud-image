@@ -34,10 +34,11 @@ import (
 	"strings"
 	"syscall"
 
-	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	log "github.com/sirupsen/logrus"
 
 	"golang.org/x/xerrors"
+
+	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 )
 
 var (

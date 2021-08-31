@@ -32,13 +32,14 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
 	log "github.com/sirupsen/logrus"
 	"github.com/snapcore/snapd/testutil"
 
 	"golang.org/x/sys/unix"
 
 	. "gopkg.in/check.v1"
+
+	. "github.com/canonical/encrypt-cloud-image/internal/exec"
 )
 
 func Test(t *testing.T) { TestingT(t) }

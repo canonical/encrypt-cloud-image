@@ -30,10 +30,11 @@ import (
 	"sort"
 
 	"github.com/canonical/go-efilib"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 	"github.com/jessevdk/go-flags"
 
 	"golang.org/x/xerrors"
+
+	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
 type Options struct {

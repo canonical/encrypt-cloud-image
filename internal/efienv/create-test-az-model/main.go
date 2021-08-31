@@ -28,10 +28,11 @@ import (
 	"os"
 
 	"github.com/canonical/go-efilib"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 	log "github.com/sirupsen/logrus"
 
 	"golang.org/x/xerrors"
+
+	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
 var (

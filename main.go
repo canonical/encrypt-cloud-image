@@ -32,9 +32,9 @@ import (
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
-	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
+	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/logutil"
+	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 const (

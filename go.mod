@@ -1,4 +1,4 @@
-module github.com/chrisccoulson/encrypt-cloud-image
+module github.com/canonical/encrypt-cloud-image
 
 go 1.13
 

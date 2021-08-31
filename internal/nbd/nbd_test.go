@@ -34,12 +34,13 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
 	"github.com/snapcore/snapd/testutil"
 
 	"golang.org/x/sys/unix"
 
 	. "gopkg.in/check.v1"
+
+	. "github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 func Test(t *testing.T) { TestingT(t) }

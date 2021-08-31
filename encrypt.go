@@ -37,11 +37,11 @@ import (
 
 	"golang.org/x/xerrors"
 
-	internal_exec "github.com/chrisccoulson/encrypt-cloud-image/internal/exec"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/gpt"
-	internal_ioutil "github.com/chrisccoulson/encrypt-cloud-image/internal/ioutil"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/luks2"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/nbd"
+	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/gpt"
+	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
+	"github.com/canonical/encrypt-cloud-image/internal/luks2"
+	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 const (
@@ -262,7 +262,7 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
 
 	if opts.OverrideDatasources != "" {
-		datasourceOverrideTmpl := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
+		datasourceOverrideTmpl := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
 datasource_list: [ %s ]
 `
 		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, opts.OverrideDatasources)
@@ -273,7 +273,7 @@ datasource_list: [ %s ]
 	}
 
 	if opts.GrowRoot {
-		disableGrowPart := `# this file was automatically created by github.com/chrisccoulson/encrypt-cloud-image
+		disableGrowPart := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
 growpart:
     mode: off
 `

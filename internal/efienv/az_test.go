@@ -27,9 +27,10 @@ import (
 
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
-	. "github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
 
 	. "gopkg.in/check.v1"
+
+	. "github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
 type azSuite struct{}

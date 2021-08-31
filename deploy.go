@@ -38,9 +38,9 @@ import (
 
 	"golang.org/x/xerrors"
 
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/efienv"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/gpt"
-	"github.com/chrisccoulson/encrypt-cloud-image/internal/luks2"
+	"github.com/canonical/encrypt-cloud-image/internal/efienv"
+	"github.com/canonical/encrypt-cloud-image/internal/gpt"
+	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
 
 type deployOptions struct {

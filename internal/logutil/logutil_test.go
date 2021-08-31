@@ -24,10 +24,11 @@ import (
 	"os"
 	"testing"
 
-	. "github.com/chrisccoulson/encrypt-cloud-image/internal/logutil"
 	log "github.com/sirupsen/logrus"
 
 	. "gopkg.in/check.v1"
+
+	. "github.com/canonical/encrypt-cloud-image/internal/logutil"
 )
 
 func Test(t *testing.T) { TestingT(t) }
