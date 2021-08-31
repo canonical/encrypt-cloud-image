@@ -107,7 +107,7 @@ func runCommand(command flags.Commander, args []string) error {
 		log.Debugln("Enabling verbose output")
 	}
 
-	log.Debugln("args:", strings.Join(args, " "))
+	log.Debugln("args:", strings.Join(os.Args, " "))
 
 	if err := checkPrerequisites(); err != nil {
 		return err
