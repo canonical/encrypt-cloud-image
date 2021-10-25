@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 
 	"github.com/canonical/go-efilib"
+	"github.com/canonical/go-tpm2"
 	"github.com/canonical/tcglog-parser"
 
 	. "gopkg.in/check.v1"
@@ -46,7 +47,7 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 	c.Check(dec.Decode(&profile), IsNil)
 	c.Check(f.Close(), IsNil)
 
-	env, err := NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
+	env, err := NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
 	c.Assert(err, IsNil)
 
 	for _, v := range []struct {
@@ -81,8 +82,8 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 
 	log, err := env.ReadEventLog()
 	c.Assert(err, IsNil)
-	c.Check(log.Spec, Equals, tcglog.SpecEFI_2)
-	c.Check(log.Algorithms, DeepEquals, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
+	c.Check(log.Spec.IsEFI_2(), Equals, true)
+	c.Check(log.Algorithms, DeepEquals, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
 
 	c.Assert(log.Events, HasLen, 8)
 	c.Check(log.Events[0], isEFIVariableDriverConfigEvent, 7, "SecureBoot", efi.GlobalVariable, []byte{0x01})

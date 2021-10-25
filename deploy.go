@@ -26,14 +26,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
+	"github.com/snapcore/secboot"
 	secboot_efi "github.com/snapcore/secboot/efi"
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
-	"os"
-	"path/filepath"
 
 	"golang.org/x/xerrors"
 
@@ -43,6 +46,7 @@ import (
 )
 
 type deployOptions struct {
+	RecoveryKeyFile string `long:"recovery-key-file" description:"Add a recovery key from the supplied file. The key must be 16-bytes long"`
 	AddEFIBootManagerProfile bool `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
 	AddEFISecureBootProfile  bool `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
 	AddUbuntuKernelProfile   bool `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
@@ -245,7 +249,7 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 			return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
 		}
 
-		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256})
+		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
 		if err != nil {
 			return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
 		}
@@ -265,13 +269,13 @@ func newEFIEnvironment(opts *deployOptions) (secboot_efi.HostEnvironment, error)
 			return nil, xerrors.Errorf("cannot decode UEFI config: %w", err)
 		}
 
-		return efienv.NewEnvironment(&config, tcglog.AlgorithmIdList{tcglog.AlgorithmSha256}), nil
+		return efienv.NewEnvironment(&config, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256}), nil
 	}
 
 	return nil, nil
 }
 
-func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, removeToken func() error, err error) {
+func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte, path string, removeToken func() error, err error) {
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range partitions {
@@ -292,27 +296,27 @@ func readKeyFromImage(devicePath string, partitions gpt.Partitions) (key []byte,
 
 			k, ok := token.Params[luks2TokenKey]
 			if !ok {
-				return nil, nil, errors.New("token has missing field")
+				return nil, "", nil, errors.New("token has missing field")
 			}
 
 			s, ok := k.(string)
 			if !ok {
-				return nil, nil, errors.New("token data has the wrong type")
+				return nil, "", nil, errors.New("token data has the wrong type")
 			}
 
 			key, err = base64.StdEncoding.DecodeString(s)
 			if err != nil {
-				return nil, nil, err
+				return nil, "", nil, err
 			}
 
-			return key, func() error {
+			return key, path, func() error {
 				log.Infoln("removing cleartext token from LUKS2 container")
 				return luks2.RemoveToken(path, i)
 			}, nil
 		}
 	}
 
-	return nil, nil, errors.New("no value LUKS2 container found")
+	return nil, "", nil, errors.New("no valid LUKS2 container found")
 }
 
 func deployImageOnDevice(devicePath string, opts *deployOptions) error {
@@ -329,7 +333,7 @@ func deployImageOnDevice(devicePath string, opts *deployOptions) error {
 	}
 	log.Debugln("partition table for", devicePath, ":", partitions)
 
-	key, removeToken, err := readKeyFromImage(devicePath, partitions)
+	key, rootDevPath, removeToken, err := readKeyFromImage(devicePath, partitions)
 	if err != nil {
 		return xerrors.Errorf("cannot read key from LUKS2 container: %w", err)
 	}
@@ -390,6 +394,22 @@ func deployImageOnDevice(devicePath string, opts *deployOptions) error {
 	if !opts.StandardSRKTemplate {
 		if err := writeCustomSRKTemplate(srkPub, filepath.Join(espPath, "tpm2-srk.tmpl"), opts); err != nil {
 			return xerrors.Errorf("cannot write custom SRK template: %w", err)
+		}
+	}
+
+	if opts.RecoveryKeyFile != "" {
+		log.Infoln("Adding recovery key to image")
+		b, err := ioutil.ReadFile(opts.RecoveryKeyFile)
+		if err != nil {
+			return xerrors.Errorf("cannot read recovery key from file: %w", err)
+		}
+		if len(b) != 16 {
+			return errors.New("recovery key must be 16 bytes")
+		}
+		var recoveryKey secboot.RecoveryKey
+		copy(recoveryKey[:], b)
+		if err := secboot.AddRecoveryKeyToLUKS2Container(rootDevPath, key, recoveryKey, nil); err != nil {
+			return xerrors.Errorf("cannot add recovery key: %w", err)
 		}
 	}
 

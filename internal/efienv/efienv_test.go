@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/canonical/go-efilib"
+	"github.com/canonical/go-tpm2"
 	"github.com/canonical/tcglog-parser"
 
 	. "gopkg.in/check.v1"
@@ -127,7 +128,7 @@ func (checker *isSeparatorEventChecker) Check(params []interface{}, names []stri
 	if !ok {
 		return false, "invalid event data type"
 	}
-	if data.IsError {
+	if data.IsError() {
 		return false, "invalid event data"
 	}
 
@@ -240,7 +241,7 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 
 	log, err := env.ReadEventLog()
 	c.Assert(err, IsNil)
-	c.Check(log.Spec, Equals, tcglog.SpecEFI_2)
+	c.Check(log.Spec.IsEFI_2(), Equals, true)
 	c.Check(log.Algorithms, DeepEquals, data.logAlgs)
 
 	totalEvents := 8
@@ -266,7 +267,7 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 func (s *efienvSuite) TestNewEnvironment1(c *C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi.json",
-		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha256},
+		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256},
 		omitsReadyToBootEvent: false,
 	})
 }
@@ -274,7 +275,7 @@ func (s *efienvSuite) TestNewEnvironment1(c *C) {
 func (s *efienvSuite) TestNewEnvironment2(c *C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi-omits-rtb-event.json",
-		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha256},
+		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256},
 		omitsReadyToBootEvent: true,
 	})
 }
@@ -282,7 +283,7 @@ func (s *efienvSuite) TestNewEnvironment2(c *C) {
 func (s *efienvSuite) TestNewEnvironment3(c *C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi.json",
-		logAlgs:               tcglog.AlgorithmIdList{tcglog.AlgorithmSha1, tcglog.AlgorithmSha256},
+		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA1, tpm2.HashAlgorithmSHA256},
 		omitsReadyToBootEvent: false,
 	})
 }

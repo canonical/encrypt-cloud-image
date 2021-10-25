@@ -74,7 +74,7 @@ func populateConfigFromVars(config *efienv.Config) error {
 		},
 	} {
 		b, _, err := efi.ReadVar(v.name, v.guid)
-		if err != nil && err != efi.ErrVariableNotFound {
+		if err != nil && err != efi.ErrVarNotExist {
 			return xerrors.Errorf("cannot read %s variable: %w", v.name, err)
 		}
 

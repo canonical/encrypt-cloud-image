@@ -76,7 +76,7 @@ func ReadPartitionTable(path string) (Partitions, error) {
 		return nil, errors.New("no valid PMBR detected")
 	}
 
-	hdr, err := efi.ReadPartitionTableHeader(io.NewSectionReader(f, blockSize, blockSize))
+	hdr, err := efi.ReadPartitionTableHeader(io.NewSectionReader(f, blockSize, blockSize), false)
 	if err != nil {
 		return nil, xerrors.Errorf("cannot read GPT header: %w", err)
 	}

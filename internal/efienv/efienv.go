@@ -102,11 +102,11 @@ func (e *env) ReadVar(name string, guid efi.GUID) ([]byte, efi.VariableAttribute
 		}
 	}
 
-	return nil, 0, efi.ErrVariableNotFound
+	return nil, 0, efi.ErrVarNotExist
 }
 
 func (e *env) ReadEventLog() (*tcglog.Log, error) {
-	log := &tcglog.Log{Spec: tcglog.SpecEFI_2, Algorithms: e.logAlgorithms}
+	log := &tcglog.Log{Spec: tcglog.Spec{PlatformType: tcglog.PlatformTypeEFI, Major: 2}, Algorithms: e.logAlgorithms}
 
 	log.Events = append(log.Events, e.makeEFIVariableDriverConfigEvent(7, "SecureBoot", efi.GlobalVariable, []byte{0x01}))
 	log.Events = append(log.Events, e.makeEFIVariableDriverConfigEvent(7, "PK", efi.GlobalVariable, nil))
