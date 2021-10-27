@@ -222,6 +222,11 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 	}
 	defer unmount()
 
+	// Disable secureboot-db.service
+	if err := os.Symlink("/dev/null", filepath.Join(mountPath, "etc/systemd/system/secureboot-db.service")); err != nil {
+		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
+	}
+
 	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
 
 	if opts.OverrideDatasources != "" {
