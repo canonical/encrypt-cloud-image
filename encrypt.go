@@ -23,6 +23,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,8 @@ import (
 const (
 	luks2MetadataKiBSize = 512
 	luks2HeaderKiBSize   = 16 * 1024
+
+	luks2GrowPartKeyslot = 10
 )
 
 type encryptOptions struct {
@@ -62,6 +65,11 @@ type encryptOptions struct {
 func (o *encryptOptions) Execute(_ []string) error {
 	e := new(imageEncrypter)
 	return e.run(o)
+}
+
+type growPartKeyData struct {
+	Key []byte `json:"key"`
+	Slot int `json:"slot"`
 }
 
 func getBlockDeviceSize(path string) (int64, error) {
@@ -204,7 +212,11 @@ func (e *imageEncrypter) maybeCopyKernelToESP() error {
 	return nil
 }
 
-func (e *imageEncrypter) growRootPartition() error {
+func (e *imageEncrypter) maybeGrowRootPartition() error {
+	if !e.opts.GrowRoot {
+		return nil
+	}
+
 	log.Infoln("growing encrypted root partition")
 
 	sz, err := getBlockDeviceSize(e.rootDevPath())
@@ -230,29 +242,29 @@ func (e *imageEncrypter) growRootPartition() error {
 	return nil
 }
 
-func (e *imageEncrypter) encryptRootPartition() error {
+func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 	devPath := e.rootDevPath()
 
 	log.Infoln("shrinking fileystem on", devPath)
 	if err := shrinkExtFS(devPath); err != nil {
-		return xerrors.Errorf("cannot shrink filesystem: %w", err)
+		return nil, xerrors.Errorf("cannot shrink filesystem: %w", err)
 	}
 
 	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
 	// so with two keys we need to keep key size at 16 each.
 	var key [16]byte
 	if _, err := rand.Read(key[:]); err != nil {
-		return xerrors.Errorf("cannot obtain primary unlock key: %w", err)
+		return nil, xerrors.Errorf("cannot obtain primary unlock key: %w", err)
 	}
 
 	log.Infoln("encrypting", devPath)
 	if err := luks2Encrypt(devPath, key[:]); err != nil {
-		return xerrors.Errorf("cannot encrypt %s: %w", devPath, err)
+		return nil, xerrors.Errorf("cannot encrypt %s: %w", devPath, err)
 	}
 
 	log.Infoln("setting label")
 	if err := luks2SetLabel(devPath, "cloudimg-rootfs-enc"); err != nil {
-		return xerrors.Errorf("cannot set label: %w", err)
+		return nil, xerrors.Errorf("cannot set label: %w", err)
 	}
 
 	token := &luks2.Token{
@@ -265,7 +277,7 @@ func (e *imageEncrypter) encryptRootPartition() error {
 
 	log.Infoln("importing cleartext token")
 	if err := luks2.ImportToken(devPath, token); err != nil {
-		return xerrors.Errorf("cannot import token into LUKS2 container: %w", err)
+		return nil, xerrors.Errorf("cannot import token into LUKS2 container: %w", err)
 	}
 
 	e.enterScope()
@@ -274,7 +286,7 @@ func (e *imageEncrypter) encryptRootPartition() error {
 	volumeName := filepath.Base(devPath)
 	log.Infoln("attaching encrypted container as", volumeName)
 	if err := luks2.Activate(volumeName, devPath, key[:]); err != nil {
-		return xerrors.Errorf("cannot activate LUKS container: %w", err)
+		return nil, xerrors.Errorf("cannot activate LUKS container: %w", err)
 	}
 	e.addCleanup(func() error {
 		log.Infoln("detaching", volumeName)
@@ -287,13 +299,13 @@ func (e *imageEncrypter) encryptRootPartition() error {
 
 	log.Infoln("growing filesystem on", path)
 	if err := growExtFS(path); err != nil {
-		return xerrors.Errorf("cannot grow filesystem: %w", err)
+		return nil, xerrors.Errorf("cannot grow filesystem: %w", err)
 	}
 
-	return nil
+	return key[:], nil
 }
 
-func (e *imageEncrypter) customizeRootFS() error {
+func (e *imageEncrypter) customizeRootFS(growPartKey [32]byte) error {
 	log.Infoln("applying customizations to image")
 
 	e.enterScope()
@@ -309,13 +321,11 @@ func (e *imageEncrypter) customizeRootFS() error {
 		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
 	}
 
-	if e.opts.OverrideDatasources == "" && !e.opts.GrowRoot {
-		return nil
-	}
-
 	cloudCfgDir := filepath.Join(path, "etc/cloud/cloud.cfg.d")
 
 	if e.opts.OverrideDatasources != "" {
+		log.Debugln("overriding cloud-init datasources")
+
 		datasourceOverrideTmpl := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
 datasource_list: [ %s ]
 `
@@ -327,6 +337,8 @@ datasource_list: [ %s ]
 	}
 
 	if e.opts.GrowRoot {
+		log.Debugln("disabling cloud-init cc_growpart")
+
 		disableGrowPart := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
 growpart:
     mode: off
@@ -334,6 +346,20 @@ growpart:
 
 		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
 			return xerrors.Errorf("cannot create growpart override file: %w", err)
+		}
+	} else {
+		log.Debugln("writing key data for cloud-init cc_growpart")
+
+		data := growPartKeyData{
+			Key: growPartKey[:],
+			Slot: luks2GrowPartKeyslot}
+		b, err := json.Marshal(&data)
+		if err != nil {
+			return xerrors.Errorf("cannot marshal key data for growpart: %w", err)
+		}
+
+		if err := ioutil.WriteFile(filepath.Join(path, "cc_growpart_keydata"), b, 0600); err != nil {
+			return xerrors.Errorf("cannot write key data for growpart: %w", err)
 		}
 	}
 
@@ -351,18 +377,30 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 		return err
 	}
 
-	if err := e.customizeRootFS(); err != nil {
+	var growPartKey [32]byte
+	if !e.opts.GrowRoot {
+		if _, err := rand.Read(growPartKey[:]); err != nil {
+			return xerrors.Errorf("cannot obtain key for cc_growpart: %w", err)
+		}
+	}
+
+	if err := e.customizeRootFS(growPartKey); err != nil {
 		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
 	}
 
-	if err := e.encryptRootPartition(); err != nil {
+	key, err := e.encryptRootPartition()
+	if err != nil {
 		return xerrors.Errorf("cannot encrypt root partition: %w", err)
 	}
 
-	if e.opts.GrowRoot {
-		if err := e.growRootPartition(); err != nil {
-			return xerrors.Errorf("cannot grow root partition: %w", err)
+	if !e.opts.GrowRoot {
+		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &luks2.AddKeyOptions{KDFTime: 100 * time.Millisecond, Slot: luks2GrowPartKeyslot}); err != nil {
+			return xerrors.Errorf("cannot add key to container for cc_growpart: %w", err)
 		}
+	}
+
+	if err := e.maybeGrowRootPartition(); err != nil {
+		return xerrors.Errorf("cannot grow root partition: %w", err)
 	}
 
 	if err := e.maybeCopyKernelToESP(); err != nil {
