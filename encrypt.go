@@ -203,10 +203,6 @@ func encryptExtDevice(path string) error {
 }
 
 func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
-	if opts.OverrideDatasources == "" && !opts.GrowRoot {
-		return nil
-	}
-
 	log.Infoln("applying customizations to image")
 
 	mountPath := filepath.Join(workingDir, "rootfs")
@@ -225,6 +221,10 @@ func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
 	// Disable secureboot-db.service
 	if err := os.Symlink("/dev/null", filepath.Join(mountPath, "etc/systemd/system/secureboot-db.service")); err != nil {
 		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
+	}
+
+	if opts.OverrideDatasources == "" && !opts.GrowRoot {
+		return nil
 	}
 
 	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
