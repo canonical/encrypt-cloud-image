@@ -68,8 +68,8 @@ func (o *encryptOptions) Execute(_ []string) error {
 }
 
 type growPartKeyData struct {
-	Key []byte `json:"key"`
-	Slot int `json:"slot"`
+	Key  []byte `json:"key"`
+	Slot int    `json:"slot"`
 }
 
 func getBlockDeviceSize(path string) (int64, error) {
@@ -212,11 +212,7 @@ func (e *imageEncrypter) maybeCopyKernelToESP() error {
 	return nil
 }
 
-func (e *imageEncrypter) maybeGrowRootPartition() error {
-	if !e.opts.GrowRoot {
-		return nil
-	}
-
+func (e *imageEncrypter) growRootPartition() error {
 	log.Infoln("growing encrypted root partition")
 
 	sz, err := getBlockDeviceSize(e.rootDevPath())
@@ -267,9 +263,9 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 		return nil, xerrors.Errorf("cannot set label: %w", err)
 	}
 
-	token := &luks2.Token{
-		Type:     luks2TokenType,
-		Keyslots: []int{0},
+	token := &luks2.GenericToken{
+		TokenType:     luks2TokenType,
+		TokenKeyslots: []int{0},
 		Params: map[string]interface{}{
 			luks2TokenKey: key[:],
 		},
@@ -351,7 +347,7 @@ growpart:
 		log.Debugln("writing key data for cloud-init cc_growpart")
 
 		data := growPartKeyData{
-			Key: growPartKey[:],
+			Key:  growPartKey[:],
 			Slot: luks2GrowPartKeyslot}
 		b, err := json.Marshal(&data)
 		if err != nil {
@@ -394,12 +390,15 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 	}
 
 	if !e.opts.GrowRoot {
-		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &luks2.AddKeyOptions{KDFTime: 100 * time.Millisecond, Slot: luks2GrowPartKeyslot}); err != nil {
+		opts := luks2.AddKeyOptions{
+			KDFOptions: luks2.KDFOptions{
+				MemoryKiB:       32 * 1024,
+				ForceIterations: 4},
+			Slot: luks2GrowPartKeyslot}
+		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &opts); err != nil {
 			return xerrors.Errorf("cannot add key to container for cc_growpart: %w", err)
 		}
-	}
-
-	if err := e.maybeGrowRootPartition(); err != nil {
+	} else if err := e.growRootPartition(); err != nil {
 		return xerrors.Errorf("cannot grow root partition: %w", err)
 	}
 

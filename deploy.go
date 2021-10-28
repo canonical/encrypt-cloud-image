@@ -319,13 +319,13 @@ func (d *imageDeployer) readKeyFromImage() (key []byte, removeToken func() error
 		}
 
 		for i, token := range hdr.Metadata.Tokens {
-			if token.Type != luks2TokenType {
+			if token.Type() != luks2TokenType {
 				continue
 			}
 
 			log.Debugln("found token at index", i, "on", path)
 
-			k, ok := token.Params[luks2TokenKey]
+			k, ok := token.(*luks2.GenericToken).Params[luks2TokenKey]
 			if !ok {
 				return nil, nil, errors.New("token has missing field")
 			}
