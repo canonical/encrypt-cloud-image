@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,7 +33,10 @@ import (
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
+	"golang.org/x/xerrors"
+
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	"github.com/canonical/encrypt-cloud-image/internal/logutil"
 	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
@@ -56,49 +60,194 @@ var (
 	parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 )
 
-func unmount(path string) error {
-	cmd := internal_exec.LoggedCommand("umount", path)
-	return cmd.Run()
-}
-
-func mount(dev, path, fs string) (cleanup func(), err error) {
+func mount(dev, path, fs string) (cleanup func() error, err error) {
 	cmd := internal_exec.LoggedCommand("mount", "-t", fs, dev, path)
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
-	return func() {
+	return func() error {
 		log.Debugln("unmounting", path)
-		if err := unmount(path); err != nil {
-			log.WithError(err).Panicln("cannot unmount", path)
-		}
+		cmd := internal_exec.LoggedCommand("umount", path)
+		return cmd.Run()
 	}, nil
 }
 
-func connectNbd(path string) (conn *nbd.Connection, cleanup func(), err error) {
-	conn, err = nbd.ConnectImage(path)
-	if err != nil {
-		return nil, nil, err
-	}
+type encryptCloudImageBase struct {
+	cleanupHandlers [][]func() error
 
-	return conn, func() {
-		log.Debugln("disconnecting", conn.DevPath())
-		if err := conn.Disconnect(); err != nil {
-			log.WithError(err).Panicln("cannot disconnect from", conn.DevPath())
-		}
-	}, nil
+	workingDir string
+	devPath    string
+
+	partitions    gpt.Partitions
+	rootPartition *gpt.PartitionEntry
+	esp           *gpt.PartitionEntry
 }
 
-func mkTempDir(dir string) (name string, cleanup func(), err error) {
-	name, err = ioutil.TempDir(dir, "encrypt-cloud-image.")
-	if err != nil {
-		return "", nil, err
+func (b *encryptCloudImageBase) workingDirPath() string {
+	if b.workingDir == "" {
+		log.Panicln("missing call to setupWorkingDir")
 	}
-	return name, func() {
+	return b.workingDir
+}
+
+func (b *encryptCloudImageBase) rootDevPath() string {
+	if b.rootPartition == nil {
+		log.Panicln("missing call to detectPartitions")
+	}
+	return fmt.Sprintf("%sp%d", b.devPath, b.rootPartition.Index)
+}
+
+func (b *encryptCloudImageBase) espDevPath() string {
+	if b.esp == nil {
+		log.Panicln("missing call to detectPartitions")
+	}
+	return fmt.Sprintf("%sp%d", b.devPath, b.esp.Index)
+}
+
+func (b *encryptCloudImageBase) addCleanup(fn func() error) {
+	if len(b.cleanupHandlers) == 0 {
+		log.Panicln("missing call to enterScope")
+	}
+	b.cleanupHandlers[0] = append(b.cleanupHandlers[0], fn)
+}
+
+func (b *encryptCloudImageBase) enterScope() {
+	b.cleanupHandlers = append([][]func() error{{}}, b.cleanupHandlers...)
+}
+
+func (b *encryptCloudImageBase) exitScope() {
+	if len(b.cleanupHandlers) == 0 {
+		log.Panicln("too many calls to exitScope")
+	}
+
+	n := 0
+
+	for len(b.cleanupHandlers[0]) > 0 {
+		l := len(b.cleanupHandlers[0])
+		fn := b.cleanupHandlers[0][l-1]
+		b.cleanupHandlers[0] = b.cleanupHandlers[0][:l-1]
+		if err := fn(); err != nil {
+			log.WithError(err).Errorln(err)
+			n += 1
+		}
+	}
+
+	b.cleanupHandlers = b.cleanupHandlers[1:]
+
+	if n > 0 {
+		log.Panicln(n, "cleanup handlers failed")
+	}
+}
+
+func (b *encryptCloudImageBase) setupWorkingDir(baseDir string) error {
+	name, err := ioutil.TempDir(baseDir, "encrypt-cloud-image.")
+	if err != nil {
+		return xerrors.Errorf("cannot setup working directory: %w", err)
+	}
+	b.workingDir = name
+	log.Infoln("temporary working directory:", name)
+
+	b.addCleanup(func() error {
 		log.Debugln("removing", name)
 		if err := os.RemoveAll(name); err != nil {
-			log.WithError(err).Panicln("cannot remove temporary directory")
+			return xerrors.Errorf("cannot remove working directory: %w", err)
 		}
-	}, nil
+		return nil
+	})
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) connectNbd(path string) error {
+	conn, err := nbd.ConnectImage(path)
+	if err != nil {
+		return xerrors.Errorf("cannot connect %s to NBD device: %w", path, err)
+	}
+	b.devPath = conn.DevPath()
+	log.Infoln("connected", path, "to", conn.DevPath())
+
+	b.addCleanup(func() error {
+		log.Debugln("disconnecting", conn.DevPath())
+		if err := conn.Disconnect(); err != nil {
+			return xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)
+		}
+		return nil
+	})
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) detectPartitions() error {
+	partitions, err := gpt.ReadPartitionTable(b.devPath)
+	if err != nil {
+		return xerrors.Errorf("cannot read partition table from %s: %w", b.devPath, err)
+	}
+	b.partitions = partitions
+	log.Debugln("partition table for", b.devPath, ":", partitions)
+
+	// XXX: Could there be more than one partition with this type?
+	root := partitions.FindByPartitionType(linuxFilesystemGUID)
+	if root == nil {
+		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, b.devPath)
+	}
+	log.Debugln("rootfs partition on", b.devPath, ":", root)
+	b.rootPartition = root
+	log.Infoln("device node for rootfs partition:", b.rootDevPath())
+
+	esp := partitions.FindByPartitionType(espGUID)
+	if esp == nil {
+		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, b.devPath)
+	}
+	log.Debugln("ESP on", b.devPath, ":", esp)
+	b.esp = esp
+	log.Infoln("device node for ESP:", b.espDevPath())
+	return nil
+}
+
+func (b *encryptCloudImageBase) mount(devPath, mountPath, fs string) error {
+	unmount, err := mount(devPath, mountPath, fs)
+	if err != nil {
+		return err
+	}
+
+	b.addCleanup(func() error {
+		if err := unmount(); err != nil {
+			return xerrors.Errorf("cannot unmount %s: %w", mountPath, err)
+		}
+		return nil
+	})
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) mountRoot() (path string, err error) {
+	path = filepath.Join(b.workingDirPath(), "rootfs")
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return "", xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
+	}
+
+	log.Infoln("mounting root filesystem to", path)
+
+	if err := b.mount(b.rootDevPath(), path, "ext4"); err != nil {
+		return "", xerrors.Errorf("cannot mount rootfs: %w", err)
+	}
+
+	return path, nil
+}
+
+func (b *encryptCloudImageBase) mountESP() (path string, err error) {
+	path = filepath.Join(b.workingDirPath(), "esp")
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return "", xerrors.Errorf("cannot create directory to mount ESP: %w", err)
+	}
+
+	log.Infoln("mounting ESP to", path)
+
+	if err := b.mount(b.espDevPath(), path, "vfat"); err != nil {
+		return "", xerrors.Errorf("cannot mount ESP: %w", err)
+	}
+
+	return path, nil
 }
 
 func runCommand(command flags.Commander, args []string) error {

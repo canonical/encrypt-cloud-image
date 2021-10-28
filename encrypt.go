@@ -37,7 +37,6 @@ import (
 	"golang.org/x/xerrors"
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
-	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
@@ -61,7 +60,8 @@ type encryptOptions struct {
 }
 
 func (o *encryptOptions) Execute(_ []string) error {
-	return encryptImage(o)
+	e := new(imageEncrypter)
+	return e.run(o)
 }
 
 func getBlockDeviceSize(path string) (int64, error) {
@@ -72,32 +72,6 @@ func getBlockDeviceSize(path string) (int64, error) {
 	defer f.Close()
 
 	return f.Seek(0, io.SeekEnd)
-}
-
-func growPartition(diskDevPath, partDevPath string, partNum int) error {
-	log.Infoln("growing encrypted partition")
-
-	sz, err := getBlockDeviceSize(partDevPath)
-	if err != nil {
-		return xerrors.Errorf("cannot determine current partition size: %w", err)
-	}
-	log.Debugln("current size:", sz)
-
-	cmd := internal_exec.LoggedCommand("growpart", diskDevPath, strconv.Itoa(partNum))
-	if err := cmd.Run(); err != nil {
-		return xerrors.Errorf("cannot grow partition: %w", err)
-	}
-
-	// XXX: This is a bit of a hack to avoid a race whilst the kernel
-	// re-reads the partition table.
-	time.Sleep(2 * time.Second)
-	sz, err = getBlockDeviceSize(partDevPath)
-	if err != nil {
-		return xerrors.Errorf("cannot determine new partition size: %w", err)
-	}
-	log.Debugln("new size:", sz)
-
-	return nil
 }
 
 func luks2Encrypt(path string, key []byte) error {
@@ -143,115 +117,6 @@ func growExtFS(path string) error {
 func shrinkExtFS(path string) error {
 	cmd := internal_exec.LoggedCommand("resize2fs", "-fM", "-d", "62", path)
 	return cmd.Run()
-}
-
-func encryptExtDevice(path string) error {
-	log.Infoln("shrinking fileystem on", path)
-	if err := shrinkExtFS(path); err != nil {
-		return xerrors.Errorf("cannot shrink filesystem: %w", err)
-	}
-
-	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
-	// so with two keys we need to keep key size at 16 each.
-	var key [16]byte
-	if _, err := rand.Read(key[:]); err != nil {
-		return xerrors.Errorf("cannot obtain primary unlock key: %w", err)
-	}
-
-	log.Infoln("encrypting", path)
-	if err := luks2Encrypt(path, key[:]); err != nil {
-		return xerrors.Errorf("cannot encrypt %s: %w", path, err)
-	}
-
-	log.Infoln("setting label")
-	if err := luks2SetLabel(path, "cloudimg-rootfs-enc"); err != nil {
-		return xerrors.Errorf("cannot set label: %w", err)
-	}
-
-	token := &luks2.Token{
-		Type:     luks2TokenType,
-		Keyslots: []int{0},
-		Params: map[string]interface{}{
-			luks2TokenKey: key[:],
-		},
-	}
-
-	log.Infoln("importing cleartext token")
-	if err := luks2.ImportToken(path, token); err != nil {
-		return xerrors.Errorf("cannot import token into LUKS2 container: %w", err)
-	}
-
-	volumeName := filepath.Base(path)
-	log.Infoln("attaching encrypted container as", volumeName)
-	if err := luks2.Activate(volumeName, path, key[:]); err != nil {
-		return xerrors.Errorf("cannot activate LUKS container: %w", err)
-	}
-	defer func() {
-		log.Infoln("detaching", volumeName)
-		if err := luks2.Deactivate(volumeName); err != nil {
-			log.WithError(err).Panicln("cannot detach container")
-		}
-	}()
-	path = filepath.Join("/dev/mapper", volumeName)
-
-	log.Infoln("growing filesystem on", path)
-	if err := growExtFS(path); err != nil {
-		return xerrors.Errorf("cannot grow filesystem: %w", err)
-	}
-
-	return nil
-}
-
-func customizeRootFS(workingDir, path string, opts *encryptOptions) error {
-	log.Infoln("applying customizations to image")
-
-	mountPath := filepath.Join(workingDir, "rootfs")
-	if err := os.Mkdir(mountPath, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
-	}
-
-	log.Infoln("mounting root filesystem to", mountPath)
-
-	unmount, err := mount(path, mountPath, "ext4")
-	if err != nil {
-		return xerrors.Errorf("cannot mount rootfs: %w", err)
-	}
-	defer unmount()
-
-	// Disable secureboot-db.service
-	if err := os.Symlink("/dev/null", filepath.Join(mountPath, "etc/systemd/system/secureboot-db.service")); err != nil {
-		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
-	}
-
-	if opts.OverrideDatasources == "" && !opts.GrowRoot {
-		return nil
-	}
-
-	cloudCfgDir := filepath.Join(mountPath, "etc/cloud/cloud.cfg.d")
-
-	if opts.OverrideDatasources != "" {
-		datasourceOverrideTmpl := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
-datasource_list: [ %s ]
-`
-		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, opts.OverrideDatasources)
-
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
-			return xerrors.Errorf("cannot create datasource override file: %w", err)
-		}
-	}
-
-	if opts.GrowRoot {
-		disableGrowPart := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
-growpart:
-    mode: off
-`
-
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
-			return xerrors.Errorf("cannot create growpart override file: %w", err)
-		}
-	}
-
-	return nil
 }
 
 func validImageExt(ext string) bool {
@@ -308,7 +173,216 @@ func tryToOpenArchivedImage(f *os.File) (r io.ReadCloser, err error) {
 	return r, nil
 }
 
-func prepareWorkingImage(workingDir string, f *os.File, opts *encryptOptions) (string, error) {
+type imageEncrypter struct {
+	encryptCloudImageBase
+
+	opts   *encryptOptions
+	failed bool
+}
+
+func (e *imageEncrypter) maybeCopyKernelToESP() error {
+	if e.opts.KernelEfi == "" {
+		return nil
+	}
+
+	e.enterScope()
+	defer e.exitScope()
+
+	path, err := e.mountESP()
+	if err != nil {
+		return err
+	}
+
+	dst := filepath.Join(path, "EFI/ubuntu/grubx64.efi")
+	if err := os.Remove(dst); err != nil {
+		return xerrors.Errorf("cannot remove grub: %w", err)
+	}
+	if err := internal_ioutil.CopyFile(dst, e.opts.KernelEfi); err != nil {
+		return xerrors.Errorf("cannot install kernel: %w", err)
+	}
+
+	return nil
+}
+
+func (e *imageEncrypter) growRootPartition() error {
+	log.Infoln("growing encrypted root partition")
+
+	sz, err := getBlockDeviceSize(e.rootDevPath())
+	if err != nil {
+		return xerrors.Errorf("cannot determine current partition size: %w", err)
+	}
+	log.Debugln("current size:", sz)
+
+	cmd := internal_exec.LoggedCommand("growpart", e.devPath, strconv.Itoa(e.rootPartition.Index))
+	if err := cmd.Run(); err != nil {
+		return xerrors.Errorf("cannot grow partition: %w", err)
+	}
+
+	// XXX: This is a bit of a hack to avoid a race whilst the kernel
+	// re-reads the partition table.
+	time.Sleep(2 * time.Second)
+	sz, err = getBlockDeviceSize(e.rootDevPath())
+	if err != nil {
+		return xerrors.Errorf("cannot determine new partition size: %w", err)
+	}
+	log.Debugln("new size:", sz)
+
+	return nil
+}
+
+func (e *imageEncrypter) encryptRootPartition() error {
+	devPath := e.rootDevPath()
+
+	log.Infoln("shrinking fileystem on", devPath)
+	if err := shrinkExtFS(devPath); err != nil {
+		return xerrors.Errorf("cannot shrink filesystem: %w", err)
+	}
+
+	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
+	// so with two keys we need to keep key size at 16 each.
+	var key [16]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return xerrors.Errorf("cannot obtain primary unlock key: %w", err)
+	}
+
+	log.Infoln("encrypting", devPath)
+	if err := luks2Encrypt(devPath, key[:]); err != nil {
+		return xerrors.Errorf("cannot encrypt %s: %w", devPath, err)
+	}
+
+	log.Infoln("setting label")
+	if err := luks2SetLabel(devPath, "cloudimg-rootfs-enc"); err != nil {
+		return xerrors.Errorf("cannot set label: %w", err)
+	}
+
+	token := &luks2.Token{
+		Type:     luks2TokenType,
+		Keyslots: []int{0},
+		Params: map[string]interface{}{
+			luks2TokenKey: key[:],
+		},
+	}
+
+	log.Infoln("importing cleartext token")
+	if err := luks2.ImportToken(devPath, token); err != nil {
+		return xerrors.Errorf("cannot import token into LUKS2 container: %w", err)
+	}
+
+	e.enterScope()
+	defer e.exitScope()
+
+	volumeName := filepath.Base(devPath)
+	log.Infoln("attaching encrypted container as", volumeName)
+	if err := luks2.Activate(volumeName, devPath, key[:]); err != nil {
+		return xerrors.Errorf("cannot activate LUKS container: %w", err)
+	}
+	e.addCleanup(func() error {
+		log.Infoln("detaching", volumeName)
+		if err := luks2.Deactivate(volumeName); err != nil {
+			return xerrors.Errorf("cannot detach container: %w", err)
+		}
+		return nil
+	})
+	path := filepath.Join("/dev/mapper", volumeName)
+
+	log.Infoln("growing filesystem on", path)
+	if err := growExtFS(path); err != nil {
+		return xerrors.Errorf("cannot grow filesystem: %w", err)
+	}
+
+	return nil
+}
+
+func (e *imageEncrypter) customizeRootFS() error {
+	log.Infoln("applying customizations to image")
+
+	e.enterScope()
+	defer e.exitScope()
+
+	path, err := e.mountRoot()
+	if err != nil {
+		return err
+	}
+
+	// Disable secureboot-db.service
+	if err := os.Symlink("/dev/null", filepath.Join(path, "etc/systemd/system/secureboot-db.service")); err != nil {
+		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
+	}
+
+	if e.opts.OverrideDatasources == "" && !e.opts.GrowRoot {
+		return nil
+	}
+
+	cloudCfgDir := filepath.Join(path, "etc/cloud/cloud.cfg.d")
+
+	if e.opts.OverrideDatasources != "" {
+		datasourceOverrideTmpl := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
+datasource_list: [ %s ]
+`
+		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, e.opts.OverrideDatasources)
+
+		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
+			return xerrors.Errorf("cannot create datasource override file: %w", err)
+		}
+	}
+
+	if e.opts.GrowRoot {
+		disableGrowPart := `# this file was automatically created by github.com/canonical/encrypt-cloud-image
+growpart:
+    mode: off
+`
+
+		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
+			return xerrors.Errorf("cannot create growpart override file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (e *imageEncrypter) encryptImageOnDevice() error {
+	if e.devPath == "" {
+		panic("no device path")
+	}
+
+	log.Infoln("encrypting image on", e.devPath)
+
+	if err := e.detectPartitions(); err != nil {
+		return err
+	}
+
+	if err := e.customizeRootFS(); err != nil {
+		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
+	}
+
+	if err := e.encryptRootPartition(); err != nil {
+		return xerrors.Errorf("cannot encrypt root partition: %w", err)
+	}
+
+	if e.opts.GrowRoot {
+		if err := e.growRootPartition(); err != nil {
+			return xerrors.Errorf("cannot grow root partition: %w", err)
+		}
+	}
+
+	if err := e.maybeCopyKernelToESP(); err != nil {
+		return xerrors.Errorf("cannot copy kernel image to ESP: %w", err)
+	}
+
+	return nil
+}
+
+func (e *imageEncrypter) prepareWorkingImage() (string, error) {
+	f, err := os.Open(e.opts.Positional.Input)
+	if err != nil {
+		return "", xerrors.Errorf("cannot open source image: %w", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.WithError(err).Warningln("cannot close source image")
+		}
+	}()
+
 	r, err := tryToOpenArchivedImage(f)
 	switch {
 	case err != nil:
@@ -317,13 +391,13 @@ func prepareWorkingImage(workingDir string, f *os.File, opts *encryptOptions) (s
 		// Input file is an archive with a valid image
 		defer func() {
 			if err := r.Close(); err != nil {
-				log.WithError(err).Warningln("cannot close source image")
+				log.WithError(err).Warningln("cannot close unpacked source image")
 			}
 		}()
-		if opts.Output == "" {
+		if e.opts.Output == "" {
 			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
 		}
-	case opts.Output != "":
+	case e.opts.Output != "":
 		// Input file is not an archive and we are not encrypting the source image
 		r = f
 	default:
@@ -331,7 +405,7 @@ func prepareWorkingImage(workingDir string, f *os.File, opts *encryptOptions) (s
 		return "", nil
 	}
 
-	path := filepath.Join(workingDir, filepath.Base(opts.Output))
+	path := filepath.Join(e.workingDirPath(), filepath.Base(e.opts.Output))
 	log.Infoln("making copy of source image to", path)
 	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
 		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
@@ -340,118 +414,49 @@ func prepareWorkingImage(workingDir string, f *os.File, opts *encryptOptions) (s
 	return path, nil
 }
 
-func copyKernelToESP(workingDir, devPath, src string) error {
-	path := filepath.Join(workingDir, "esp")
-	if err := os.Mkdir(path, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to mount ESP: %w", err)
-	}
-
-	log.Infoln("mounting ESP to", path)
-	unmount, err := mount(devPath, path, "vfat")
-	if err != nil {
-		return xerrors.Errorf("cannot mount %s to %s: %w", devPath, path, err)
-	}
-	defer unmount()
-
-	dst := filepath.Join(path, "EFI/ubuntu/grubx64.efi")
-	if err := os.Remove(dst); err != nil {
-		return xerrors.Errorf("cannot remove grub: %w", err)
-	}
-	if err := internal_ioutil.CopyFile(dst, src); err != nil {
-		return xerrors.Errorf("cannot install kernel: %w", err)
-	}
-
-	return nil
-}
-
-func encryptImageOnDevice(workingDir, devicePath string, opts *encryptOptions) error {
-	partitions, err := gpt.ReadPartitionTable(devicePath)
-	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", devicePath, err)
-	}
-	log.Debugln("partition table for", devicePath, ":", partitions)
-
-	// XXX: Could there be more than one partition with this type?
-	root := partitions.FindByPartitionType(linuxFilesystemGUID)
-	if root == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, devicePath)
-	}
-	log.Debugln("rootfs partition on", devicePath, ":", root)
-	rootDevPath := fmt.Sprintf("%sp%d", devicePath, root.Index)
-	log.Infoln("device node for rootfs partition:", rootDevPath)
-
-	if err := customizeRootFS(workingDir, rootDevPath, opts); err != nil {
-		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
-	}
-
-	if err := encryptExtDevice(rootDevPath); err != nil {
-		return xerrors.Errorf("cannot encrypt %s: %w", rootDevPath, err)
-	}
-
-	if opts.GrowRoot {
-		if err := growPartition(devicePath, rootDevPath, root.Index); err != nil {
-			return xerrors.Errorf("cannot grow root partition: %w", err)
-		}
-	}
-
-	if opts.KernelEfi != "" {
-		esp := partitions.FindByPartitionType(espGUID)
-		if esp == nil {
-			return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, devicePath)
-		}
-
-		log.Debugln("ESP on", devicePath, ":", esp)
-		espDevPath := fmt.Sprintf("%sp%d", devicePath, esp.Index)
-		log.Infoln("device node for ESP:", espDevPath)
-
-		if err := copyKernelToESP(workingDir, espDevPath, opts.KernelEfi); err != nil {
-			return xerrors.Errorf("cannot copy kernel image to ESP: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func encryptImageFromFile(workingDir string, f *os.File, opts *encryptOptions) error {
-	path, err := prepareWorkingImage(workingDir, f, opts)
+func (e *imageEncrypter) encryptImageFromFile() error {
+	path, err := e.prepareWorkingImage()
 	switch {
 	case err != nil:
 		return xerrors.Errorf("cannot prepare working image: %w", err)
 	case path != "":
 		// We aren't encrypting the source image
-		defer func() {
-			if err != nil {
-				return
+		e.addCleanup(func() error {
+			if e.failed {
+				return nil
 			}
-			if err := os.Rename(path, opts.Output); err != nil {
-				log.WithError(err).Panicln("cannot move working image to final path")
+			if err := os.Rename(path, e.opts.Output); err != nil {
+				return xerrors.Errorf("cannot move working image to final path: %w", err)
 			}
-		}()
+			return nil
+		})
 	default:
 		// We are encrypting the source image
-		path = f.Name()
+		path = e.opts.Positional.Input
 	}
 
-	nbdConn, disconnectNbd, err := connectNbd(path)
-	if err != nil {
-		return xerrors.Errorf("cannot connect image to NBD device: %w", err)
+	if err := e.connectNbd(path); err != nil {
+		return err
 	}
-	log.Infoln("connected", path, "to", nbdConn.DevPath())
-	defer disconnectNbd()
 
-	return encryptImageOnDevice(workingDir, nbdConn.DevPath(), opts)
+	return e.encryptImageOnDevice()
 }
 
-func encryptImage(opts *encryptOptions) error {
-	path := opts.Positional.Input
-
-	f, err := os.Open(path)
-	if err != nil {
-		return xerrors.Errorf("cannot open source file: %w", err)
+func (e *imageEncrypter) setupWorkingDir() error {
+	var baseDir string
+	if e.opts.Output != "" {
+		baseDir = filepath.Dir(e.opts.Output)
 	}
-	defer f.Close()
+	return e.encryptCloudImageBase.setupWorkingDir(baseDir)
+}
 
-	fi, err := f.Stat()
+func (e *imageEncrypter) run(opts *encryptOptions) error {
+	e.opts = opts
+
+	e.enterScope()
+	defer e.exitScope()
+
+	fi, err := os.Stat(opts.Positional.Input)
 	if err != nil {
 		return xerrors.Errorf("cannot obtain source file information: %w", err)
 	}
@@ -460,24 +465,18 @@ func encryptImage(opts *encryptOptions) error {
 		return errors.New("cannot specify --output with a block device")
 	}
 
-	var baseDir string
-	if opts.Output != "" {
-		baseDir = filepath.Dir(opts.Output)
+	if err := e.setupWorkingDir(); err != nil {
+		return err
 	}
-	workingDir, cleanupWorkingDir, err := mkTempDir(baseDir)
-	if err != nil {
-		return xerrors.Errorf("cannot create working directory: %w", err)
-	}
-	defer cleanupWorkingDir()
-	log.Infoln("temporary working directory:", workingDir)
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
-		return encryptImageOnDevice(workingDir, path, opts)
+		e.devPath = opts.Positional.Input
+		return e.encryptImageOnDevice()
 	}
 
 	// Input file is not a block device
-	return encryptImageFromFile(workingDir, f, opts)
+	return e.encryptImageFromFile()
 }
 
 func init() {
