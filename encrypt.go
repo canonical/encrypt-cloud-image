@@ -98,8 +98,8 @@ func luks2Encrypt(path string, key []byte) error {
 		"--cipher", "aes-xts-plain64", "--key-size", "512",
 		// use argon2i as the KDF
 		"--pbkdf", "argon2i",
-		// set the KDF benchmark time
-		"--iter-time", "100",
+		// set the minimum KDF cost parameters
+		"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
 		// set the default metadata size to 512KiB
 		"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
 		// specify the keyslots area size of 16MiB - (2 * 512KiB)
