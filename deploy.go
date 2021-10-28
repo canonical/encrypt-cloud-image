@@ -241,7 +241,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	if err != nil {
 		return nil, xerrors.Errorf("cannot compute PCR values: %w", err)
 	}
-	log.Infoln("PCR values:", pcrValues)
+	log.Infoln("PCR values:")
 	for i, values := range pcrValues {
 		log.Infof(" branch %d:\n", i)
 		for alg := range values {
