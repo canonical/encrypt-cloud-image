@@ -188,24 +188,33 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	log.Infoln("computing PCR protection profile")
 	pcrProfile := secboot_tpm2.NewPCRProtectionProfile()
 
-	loadSequences := []*secboot_efi.ImageLoadEvent{
-		{
-			Source: secboot_efi.Firmware,
-			Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
-			Next: []*secboot_efi.ImageLoadEvent{
-				{
-					Source: secboot_efi.Shim,
-					Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
-				},
-			},
-		},
+	// This function assumes that the boot architecture is Azure FDE (no grub)
+	kernelPaths, err := filepath.Glob(filepath.Join(esp, "EFI/ubuntu/kernel.efi-*"))
+	if err != nil {
+		return nil, xerrors.Errorf("cannot determine kernel paths: %w", err)
 	}
+	if _, err := os.Stat(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")); err == nil {
+		kernelPaths = append(kernelPaths, filepath.Join(esp, "EFI/ubuntu/grubx64.efi"))
+	}
+
+	var kernels []*secboot_efi.ImageLoadEvent
+	for _, path := range kernelPaths {
+		log.Debugln("found kernel", path)
+		kernels = append(kernels, &secboot_efi.ImageLoadEvent{
+			Source: secboot_efi.Shim,
+			Image: secboot_efi.FileImage(path)})
+	}
+
+	loadSequences := &secboot_efi.ImageLoadEvent{
+		Source: secboot_efi.Firmware,
+		Image: secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
+		Next: kernels}
 
 	if d.opts.AddEFIBootManagerProfile {
 		log.Debugln("adding boot manager PCR profile")
 		params := secboot_efi.BootManagerProfileParams{
 			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: loadSequences,
+			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
 			Environment:   env}
 		if err := secboot_efi.AddBootManagerProfile(pcrProfile, &params); err != nil {
 			return nil, xerrors.Errorf("cannot add EFI boot manager profile: %w", err)
@@ -216,7 +225,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		log.Debugln("adding secure boot policy PCR profile")
 		params := secboot_efi.SecureBootPolicyProfileParams{
 			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: loadSequences,
+			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
 			Environment:   env}
 		if err := secboot_efi.AddSecureBootPolicyProfile(pcrProfile, &params); err != nil {
 			return nil, xerrors.Errorf("cannot add EFI secure boot policy profile: %w", err)
