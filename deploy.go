@@ -26,9 +26,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/go-tpm2/mu"
@@ -184,10 +187,36 @@ func (d *imageDeployer) readSRKPublicArea() (*tpm2.Public, error) {
 	return pub, nil
 }
 
+func findKernelEFIStubs(dir string) (string, error) {
+	efiStubs := make([]string, 0)
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		re := regexp.MustCompile(`^kernel.efi-.*$`)
+
+		if re.MatchString(d.Name()) {
+			efiStubs = append(efiStubs, path)
+		}
+		return nil
+	})
+
+	sort.Strings(efiStubs)
+
+	if len(efiStubs) == 0 {
+		return "", fmt.Errorf("cannot find kernel EFI in %v", dir)
+	}
+	return efiStubs[len(efiStubs)-1], nil
+}
+
 func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.HostEnvironment) (*secboot_tpm2.PCRProtectionProfile, error) {
 	log.Infoln("computing PCR protection profile")
 	pcrProfile := secboot_tpm2.NewPCRProtectionProfile()
 
+	searchDir := filepath.Join(esp, "EFI/ubuntu/")
+	kernelEFI, err := findKernelEFIStubs(searchDir)
+	if err != nil {
+		kernelEFI = filepath.Join(esp, "EFI/ubuntu/grubx64.efi")
+	}
+
+	log.Infof("found kernel EFI at %v", kernelEFI)
 	loadSequences := []*secboot_efi.ImageLoadEvent{
 		{
 			Source: secboot_efi.Firmware,
@@ -195,7 +224,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 			Next: []*secboot_efi.ImageLoadEvent{
 				{
 					Source: secboot_efi.Shim,
-					Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")),
+					Image:  secboot_efi.FileImage(kernelEFI),
 				},
 			},
 		},
