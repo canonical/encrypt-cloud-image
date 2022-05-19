@@ -194,6 +194,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		return nil, xerrors.Errorf("cannot determine kernel paths: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")); err == nil {
+		// Candidate images shipped a kernel at the grub path
 		kernelPaths = append(kernelPaths, filepath.Join(esp, "EFI/ubuntu/grubx64.efi"))
 	}
 
