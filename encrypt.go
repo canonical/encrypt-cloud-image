@@ -57,8 +57,6 @@ type encryptOptions struct {
 	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
-	NonNbd bool `long:"non-nbd" description:"(for backward compatibilty) Indicates that the supplied block device is not a Network Block Device."`
-
 	Positional struct {
 		Input string `positional-arg-name:"Source image path (file or block device)"`
 	} `positional-args:"true" required:"true"`
@@ -188,7 +186,6 @@ type imageEncrypter struct {
 
 	opts   *encryptOptions
 	failed bool
-	isNbdInUse bool
 }
 
 func (e *imageEncrypter) maybeCopyKernelToESP() error {
@@ -492,7 +489,6 @@ func (e *imageEncrypter) setupWorkingDir() error {
 
 func (e *imageEncrypter) run(opts *encryptOptions) error {
 	e.opts = opts
-	e.isNbdInUse = !opts.NonNbd
 
 	e.enterScope()
 	defer e.exitScope()
@@ -512,13 +508,8 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
-		e.devPath = opts.Positional.Input
-
-		// Setting device path format depending on whether the block device is NBD or not.
-		if e.isNbdInUse {
-			e.devPathFormat = "%sp%d"
-		} else {
-			e.devPathFormat = "%s%d"
+		if err := e.initDevPathFormat(opts.Positional.Input); err != nil {
+			return err
 		}
 
 		return e.encryptImageOnDevice()

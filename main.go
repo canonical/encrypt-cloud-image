@@ -83,6 +83,24 @@ type encryptCloudImageBase struct {
 	esp           *gpt.PartitionEntry
 }
 
+func (b *encryptCloudImageBase) initDevPathFormat(devPath string) error {
+	b.devPath = devPath
+
+	if strings.HasPrefix(b.devPath, "/dev/nbd") || strings.HasPrefix(b.devPath, "/dev/nvme") {
+		b.devPathFormat = "%sp%d"
+	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
+		b.devPathFormat = "%s%d"
+	} else {
+		return xerrors.Errorf("Unsuppoted device path: %s. Please look at the code to deterimine what's currently supported.", devPath)
+	}
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) isNbdDevice() bool {
+	return strings.HasPrefix(b.devPath, "/dev/nbd")
+}
+
 func (b *encryptCloudImageBase) workingDirPath() string {
 	if b.workingDir == "" {
 		log.Panicln("missing call to setupWorkingDir")
