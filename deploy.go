@@ -58,8 +58,6 @@ type deployOptions struct {
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
 
-	NonNbd bool `long:"non-nbd" description:"(for backward compatibilty) Indicates that the supplied block device is not a Network Block Device."`
-
 	Positional struct {
 		Input string `positional-arg-name:"Source image path (file or block device)"`
 	} `positional-args:"true" required:"true"`
@@ -100,8 +98,6 @@ type imageDeployer struct {
 	encryptCloudImageBase
 
 	opts *deployOptions
-
-	isNbdInUse bool
 }
 
 func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
@@ -450,7 +446,6 @@ func (d *imageDeployer) deployImageFromFile() error {
 
 func (d *imageDeployer) run(opts *deployOptions) error {
 	d.opts = opts
-	d.isNbdInUse = !opts.NonNbd
 
 	d.enterScope()
 	defer d.exitScope()
@@ -472,15 +467,9 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
-		d.devPath = opts.Positional.Input
-
-		// Setting device path format depending on whether the block device is NBD or not.
-		if d.isNbdInUse {
-			d.devPathFormat = "%sp%d"
-		} else {
-			d.devPathFormat = "%s%d"
+		if err := d.initDevPathFormat(opts.Positional.Input); err != nil {
+			return err
 		}
-
 		return d.deployImageOnDevice()
 	}
 
@@ -489,7 +478,7 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 }
 
 func (d *imageDeployer) checkPrerequisites() error {
-	if d.isNbdInUse {
+	if d.isNbdDevice() {
 		if !nbd.IsSupported() {
 			return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
 		}
