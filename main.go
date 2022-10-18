@@ -20,7 +20,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -77,6 +76,7 @@ type encryptCloudImageBase struct {
 
 	workingDir string
 	devPath    string
+	devPathFormat string
 
 	partitions    gpt.Partitions
 	rootPartition *gpt.PartitionEntry
@@ -94,14 +94,14 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 	if b.rootPartition == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf("%sp%d", b.devPath, b.rootPartition.Index)
+	return fmt.Sprintf(b.devPathFormat, b.devPath, b.rootPartition.Index)
 }
 
 func (b *encryptCloudImageBase) espDevPath() string {
 	if b.esp == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf("%sp%d", b.devPath, b.esp.Index)
+	return fmt.Sprintf(b.devPathFormat, b.devPath, b.esp.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {
@@ -266,13 +266,6 @@ func runCommand(command flags.Commander, args []string) error {
 }
 
 func checkPrerequisites() error {
-	if !nbd.IsSupported() {
-		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
-	}
-	if !nbd.IsModuleLoaded() {
-		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
-	}
-
 	for _, p := range []string{"cryptsetup", "resize2fs", "mount", "umount", "growpart"} {
 		_, err := exec.LookPath(p)
 		if err != nil {

@@ -42,6 +42,7 @@ import (
 
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
+	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 type deployOptions struct {
@@ -56,6 +57,8 @@ type deployOptions struct {
 	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
 	StandardSRKTemplate   bool   `long:"standard-srk-template" description:"Indicate that the supplied SRK was created with the TCG TPM v2.0 Provisioning Guidance spec"`
+
+	NonNbd bool `long:"non-nbd" description:"(for backward compatibilty) Indicates that the supplied block device is not a Network Block Device."`
 
 	Positional struct {
 		Input string `positional-arg-name:"Source image path (file or block device)"`
@@ -97,6 +100,8 @@ type imageDeployer struct {
 	encryptCloudImageBase
 
 	opts *deployOptions
+
+	isNbdInUse bool
 }
 
 func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
@@ -320,7 +325,7 @@ func (d *imageDeployer) readKeyFromImage() (key []byte, removeToken func() error
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range d.partitions {
-		path := fmt.Sprintf("%sp%d", d.devPath, partition.Index)
+		path := fmt.Sprintf(d.devPathFormat, d.devPath, partition.Index)
 		log.Debugln("trying", path)
 
 		hdr, err := luks2.ReadHeader(path, luks2.LockModeBlocking)
@@ -445,9 +450,12 @@ func (d *imageDeployer) deployImageFromFile() error {
 
 func (d *imageDeployer) run(opts *deployOptions) error {
 	d.opts = opts
+	d.isNbdInUse = !opts.NonNbd
 
 	d.enterScope()
 	defer d.exitScope()
+
+	d.checkPrerequisites()
 
 	if opts.StandardSRKTemplate && opts.SRKTemplateUniqueData != "" {
 		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
@@ -465,11 +473,32 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
 		d.devPath = opts.Positional.Input
+
+		// Setting device path format depending on whether the block device is NBD or not.
+		if d.isNbdInUse {
+			d.devPathFormat = "%sp%d"
+		} else {
+			d.devPathFormat = "%s%d"
+		}
+
 		return d.deployImageOnDevice()
 	}
 
 	// Source file is not a block device
 	return d.deployImageFromFile()
+}
+
+func (d *imageDeployer) checkPrerequisites() error {
+	if d.isNbdInUse {
+		if !nbd.IsSupported() {
+			return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
+		}
+		if !nbd.IsModuleLoaded() {
+			return errors.New("cannot create nbd devices because the required kernel module is not loaded")
+		}
+	}
+
+	return nil
 }
 
 func init() {
