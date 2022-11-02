@@ -42,7 +42,6 @@ import (
 
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
-	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
 type deployOptions struct {
@@ -321,7 +320,12 @@ func (d *imageDeployer) readKeyFromImage() (key []byte, removeToken func() error
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range d.partitions {
-		path := fmt.Sprintf(d.devPathFormat, d.devPath, partition.Index)
+		devPathFormat, err := d.getDevPathFormat()
+		if err != nil {
+			return nil, nil, errors.New(err.Error())
+		}
+
+		path := fmt.Sprintf(devPathFormat, d.devPath, partition.Index)
 		log.Debugln("trying", path)
 
 		hdr, err := luks2.ReadHeader(path, luks2.LockModeBlocking)
@@ -450,7 +454,9 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	d.enterScope()
 	defer d.exitScope()
 
-	d.checkPrerequisites()
+	if err := d.checkPrerequisitesBase(); err != nil {
+		return err
+	}
 
 	if opts.StandardSRKTemplate && opts.SRKTemplateUniqueData != "" {
 		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
@@ -467,27 +473,12 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
-		if err := d.initDevPathFormat(opts.Positional.Input); err != nil {
-			return err
-		}
+		d.devPath = opts.Positional.Input
 		return d.deployImageOnDevice()
 	}
 
 	// Source file is not a block device
 	return d.deployImageFromFile()
-}
-
-func (d *imageDeployer) checkPrerequisites() error {
-	if d.isNbdDevice() {
-		if !nbd.IsSupported() {
-			return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
-		}
-		if !nbd.IsModuleLoaded() {
-			return errors.New("cannot create nbd devices because the required kernel module is not loaded")
-		}
-	}
-
-	return nil
 }
 
 func init() {

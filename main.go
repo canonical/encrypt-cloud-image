@@ -20,6 +20,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -76,29 +77,37 @@ type encryptCloudImageBase struct {
 
 	workingDir string
 	devPath    string
-	devPathFormat string
 
 	partitions    gpt.Partitions
 	rootPartition *gpt.PartitionEntry
 	esp           *gpt.PartitionEntry
 }
 
-func (b *encryptCloudImageBase) initDevPathFormat(devPath string) error {
-	b.devPath = devPath
-
+func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 	if strings.HasPrefix(b.devPath, "/dev/nbd") || strings.HasPrefix(b.devPath, "/dev/nvme") {
-		b.devPathFormat = "%sp%d"
+		return "%sp%d", nil
 	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
-		b.devPathFormat = "%s%d"
+		return "%s%d", nil
 	} else {
-		return xerrors.Errorf("Unsuppoted device path: %s. Please look at the code to deterimine what's currently supported.", devPath)
+		return "", xerrors.Errorf("Unsuppoted device path: %s. Please look at the code to deterimine what's currently supported.", b.devPath)
 	}
-
-	return nil
 }
 
 func (b *encryptCloudImageBase) isNbdDevice() bool {
 	return strings.HasPrefix(b.devPath, "/dev/nbd")
+}
+
+func (b *encryptCloudImageBase) checkPrerequisitesBase() error {
+	if b.isNbdDevice() {
+		if !nbd.IsSupported() {
+			return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
+		}
+		if !nbd.IsModuleLoaded() {
+			return errors.New("cannot create nbd devices because the required kernel module is not loaded")
+		}
+	}
+
+	return nil
 }
 
 func (b *encryptCloudImageBase) workingDirPath() string {
@@ -112,14 +121,26 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 	if b.rootPartition == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf(b.devPathFormat, b.devPath, b.rootPartition.Index)
+
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, b.rootPartition.Index)
 }
 
 func (b *encryptCloudImageBase) espDevPath() string {
 	if b.esp == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf(b.devPathFormat, b.devPath, b.esp.Index)
+
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, b.esp.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {

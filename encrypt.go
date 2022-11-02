@@ -493,6 +493,10 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	e.enterScope()
 	defer e.exitScope()
 
+	if err := e.checkPrerequisitesBase(); err != nil {
+		return err
+	}
+
 	fi, err := os.Stat(opts.Positional.Input)
 	if err != nil {
 		return xerrors.Errorf("cannot obtain source file information: %w", err)
@@ -508,10 +512,7 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
-		if err := e.initDevPathFormat(opts.Positional.Input); err != nil {
-			return err
-		}
-
+		e.devPath = opts.Positional.Input
 		return e.encryptImageOnDevice()
 	}
 
