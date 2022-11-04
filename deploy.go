@@ -454,10 +454,6 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	d.enterScope()
 	defer d.exitScope()
 
-	if err := d.checkPrerequisitesBase(); err != nil {
-		return err
-	}
-
 	if opts.StandardSRKTemplate && opts.SRKTemplateUniqueData != "" {
 		return errors.New("cannot specify both --standard-srk-template and --srk-template-unique-data")
 	}
@@ -474,10 +470,20 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
 		d.devPath = opts.Positional.Input
+		if d.isNbdDevice() {
+			if err := d.checkNbdPreRequisites(); err != nil {
+				return err
+			}
+		}
+
 		return d.deployImageOnDevice()
 	}
 
 	// Source file is not a block device
+	if err := d.checkNbdPreRequisites(); err != nil {
+		return err
+	}
+
 	return d.deployImageFromFile()
 }
 

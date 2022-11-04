@@ -97,14 +97,12 @@ func (b *encryptCloudImageBase) isNbdDevice() bool {
 	return strings.HasPrefix(b.devPath, "/dev/nbd")
 }
 
-func (b *encryptCloudImageBase) checkPrerequisitesBase() error {
-	if b.isNbdDevice() {
-		if !nbd.IsSupported() {
-			return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
-		}
-		if !nbd.IsModuleLoaded() {
-			return errors.New("cannot create nbd devices because the required kernel module is not loaded")
-		}
+func (b *encryptCloudImageBase) checkNbdPreRequisites() error {
+	if !nbd.IsSupported() {
+		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
+	}
+	if !nbd.IsModuleLoaded() {
+		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
 	}
 
 	return nil
