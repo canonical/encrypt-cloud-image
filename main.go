@@ -47,6 +47,7 @@ const (
 )
 
 var (
+	Version             = "v1.0.1"
 	espGUID             = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
 	linuxFilesystemGUID = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
 )
@@ -364,6 +365,7 @@ func run(args []string) (err error) {
 }
 
 func main() {
+	log.Infoln("Version:", Version)
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
