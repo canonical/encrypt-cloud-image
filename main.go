@@ -47,6 +47,7 @@ const (
 )
 
 var (
+	Version             = "v1.0.1"
 	espGUID             = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
 	linuxFilesystemGUID = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
 )
@@ -83,6 +84,31 @@ type encryptCloudImageBase struct {
 	esp           *gpt.PartitionEntry
 }
 
+func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
+	if strings.HasPrefix(b.devPath, "/dev/nbd") || strings.HasPrefix(b.devPath, "/dev/nvme") {
+		return "%sp%d", nil
+	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
+		return "%s%d", nil
+	} else {
+		return "", xerrors.Errorf("Unsuppoted device path: %s. Please look at the code to deterimine what's currently supported.", b.devPath)
+	}
+}
+
+func (b *encryptCloudImageBase) isNbdDevice() bool {
+	return strings.HasPrefix(b.devPath, "/dev/nbd")
+}
+
+func (b *encryptCloudImageBase) checkNbdPreRequisites() error {
+	if !nbd.IsSupported() {
+		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
+	}
+	if !nbd.IsModuleLoaded() {
+		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
+	}
+
+	return nil
+}
+
 func (b *encryptCloudImageBase) workingDirPath() string {
 	if b.workingDir == "" {
 		log.Panicln("missing call to setupWorkingDir")
@@ -94,14 +120,26 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 	if b.rootPartition == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf("%sp%d", b.devPath, b.rootPartition.Index)
+
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, b.rootPartition.Index)
 }
 
 func (b *encryptCloudImageBase) espDevPath() string {
 	if b.esp == nil {
 		log.Panicln("missing call to detectPartitions")
 	}
-	return fmt.Sprintf("%sp%d", b.devPath, b.esp.Index)
+
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, b.esp.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {
@@ -266,13 +304,6 @@ func runCommand(command flags.Commander, args []string) error {
 }
 
 func checkPrerequisites() error {
-	if !nbd.IsSupported() {
-		return errors.New("cannot create nbd devices (is qemu-nbd installed?)")
-	}
-	if !nbd.IsModuleLoaded() {
-		return errors.New("cannot create nbd devices because the required kernel module is not loaded")
-	}
-
 	for _, p := range []string{"cryptsetup", "resize2fs", "mount", "umount", "growpart"} {
 		_, err := exec.LookPath(p)
 		if err != nil {
@@ -334,6 +365,7 @@ func run(args []string) (err error) {
 }
 
 func main() {
+	log.Infoln("Version:", Version)
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}

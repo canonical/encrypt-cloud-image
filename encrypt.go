@@ -509,10 +509,20 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
 		e.devPath = opts.Positional.Input
+		if e.isNbdDevice() {
+			if err := e.checkNbdPreRequisites(); err != nil {
+				return err
+			}
+		}
+
 		return e.encryptImageOnDevice()
 	}
 
 	// Input file is not a block device
+	if err := e.checkNbdPreRequisites(); err != nil {
+		return err
+	}
+
 	return e.encryptImageFromFile()
 }
 

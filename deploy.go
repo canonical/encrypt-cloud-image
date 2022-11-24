@@ -320,7 +320,12 @@ func (d *imageDeployer) readKeyFromImage() (key []byte, removeToken func() error
 	log.Infoln("reading key from LUKS2 container")
 
 	for _, partition := range d.partitions {
-		path := fmt.Sprintf("%sp%d", d.devPath, partition.Index)
+		devPathFormat, err := d.getDevPathFormat()
+		if err != nil {
+			return nil, nil, errors.New(err.Error())
+		}
+
+		path := fmt.Sprintf(devPathFormat, d.devPath, partition.Index)
 		log.Debugln("trying", path)
 
 		hdr, err := luks2.ReadHeader(path, luks2.LockModeBlocking)
@@ -465,10 +470,20 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
 		d.devPath = opts.Positional.Input
+		if d.isNbdDevice() {
+			if err := d.checkNbdPreRequisites(); err != nil {
+				return err
+			}
+		}
+
 		return d.deployImageOnDevice()
 	}
 
 	// Source file is not a block device
+	if err := d.checkNbdPreRequisites(); err != nil {
+		return err
+	}
+
 	return d.deployImageFromFile()
 }
 
