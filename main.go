@@ -90,7 +90,7 @@ func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
 		return "%s%d", nil
 	} else {
-		return "", xerrors.Errorf("Unsuppoted device path: %s. Please look at the code to deterimine what's currently supported.", b.devPath)
+		return "", xerrors.Errorf("Unsupported device path: %s. Please look at the code to determine what is currently supported.", b.devPath)
 	}
 }
 
