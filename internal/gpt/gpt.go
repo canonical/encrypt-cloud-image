@@ -43,12 +43,18 @@ type PartitionEntry struct {
 type Partitions []*PartitionEntry
 
 func (partitions Partitions) FindByPartitionType(t efi.GUID) *PartitionEntry {
+        var foundPartition *PartitionEntry
 	for _, p := range partitions {
-		if p.PartitionTypeGUID == t {
-			return p
-		}
+	    if p.PartitionTypeGUID == t {
+		if foundPartition == nil {
+			 foundPartition = p;
+		 } else {
+			 // Ambiguous as multiple partitions with GUID found.
+			 return nil;
+		 }
+	    }
 	}
-	return nil
+	return foundPartition
 }
 
 func ReadPartitionTable(path string) (Partitions, error) {
