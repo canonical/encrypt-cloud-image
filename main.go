@@ -1,3 +1,5 @@
+// -*- Mode: Go; indent-tabs-mode: t -*-
+
 /*
  * Copyright (C) 2021 Canonical Ltd
  *
@@ -59,8 +61,8 @@ var (
 	parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 )
 
-func mount(dev, path string) (cleanup func() error, err error) {
-	cmd := internal_exec.LoggedCommand("mount", dev, path)
+func mount(dev, path, fs string) (cleanup func() error, err error) {
+	cmd := internal_exec.LoggedCommand("mount", "-t", fs, dev, path)
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
@@ -114,17 +116,9 @@ func (b *encryptCloudImageBase) workingDirPath() string {
 	return b.workingDir
 }
 
-func (b *encryptCloudImageBase) partitionDevPath(index int) string {
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
-	}
-	return fmt.Sprintf(devPathFormat, b.devPath, index)
-}
-
 func (b *encryptCloudImageBase) rootDevPath() string {
 	if b.rootPartition == nil {
-		log.Panicln("missing call to detectPartitions inside rootDevPath")
+		log.Panicln("missing call to detectPartitions")
 	}
 
 	devPathFormat, err := b.getDevPathFormat()
@@ -137,7 +131,7 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 
 func (b *encryptCloudImageBase) espDevPath() string {
 	if b.esp == nil {
-		log.Panicln("missing call to detectPartitions inside espDevPath")
+		log.Panicln("missing call to detectPartitions")
 	}
 
 	devPathFormat, err := b.getDevPathFormat()
@@ -221,48 +215,6 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 	return nil
 }
 
-// This function is a heuristic incase we have multiple partitions with same efi guid and want to get first that
-// has the contents that match our expectation. We only might want to do this if we know that there are multiple such
-// partitions.
-func (b *encryptCloudImageBase) FindByDirectoryStructureHeuristic (partitions gpt.Partitions, t efi.GUID, expectedDirectories []string) *gpt.PartitionEntry {
-    tempDir, err := ioutil.TempDir("", "mnt")
-    if err != nil {
-        log.Debugln("Could not create temp dir %s", tempDir)
-        return nil
-    }
-    defer os.RemoveAll(tempDir)
-
-    for _, p := range partitions {
-        if p.PartitionTypeGUID == t {
-            partitionPath := b.partitionDevPath(p.Index)
-            // Don't use any fs type and let mount command decide.
-            unmount, err := mount(partitionPath, tempDir)
-            if err != nil {
-                log.Debugln("Could not mount (ignoring)", partitionPath)
-                continue
-            }
-            defer unmount()
-
-            match := true
-            for _,expectedDirectory := range expectedDirectories {
-                _, err := os.Stat(filepath.Join(tempDir, expectedDirectory))
-                if os.IsNotExist(err) {
-                    match = false
-                    break
-                }
-            }
-
-            // Found something that matches expected Directory structure
-            if match == true {
-                log.Debugln ("Found root volume by heuristic", partitionPath)
-                return p
-            }
-        }
-    }
-
-    return nil
-}
-
 func (b *encryptCloudImageBase) detectPartitions() error {
 	partitions, err := gpt.ReadPartitionTable(b.devPath)
 	if err != nil {
@@ -274,14 +226,7 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	// XXX: Could there be more than one partition with this type?
 	root := partitions.FindByPartitionType(linuxFilesystemGUID)
 	if root == nil {
-		log.Debugln("Could not get deterministic root partition by UUID inside ", b.devPath, " , trying directory structure")
-		// we do not expect bin and sbin to be symbolic links to usr, since we do not support seperate usr partitions.
-		expectedDirectories := []string{"bin", "sbin", "boot", "dev", "etc", "usr", "var"}
-		root = b.FindByDirectoryStructureHeuristic(partitions, linuxFilesystemGUID, expectedDirectories)
-		if root == nil {
-			return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, b.devPath)
-                }
-		log.Infoln("Found partition root as", root.Index)
+		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, b.devPath)
 	}
 	log.Debugln("rootfs partition on", b.devPath, ":", root)
 	b.rootPartition = root
@@ -291,16 +236,14 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	if esp == nil {
 		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, b.devPath)
 	}
-
 	log.Debugln("ESP on", b.devPath, ":", esp)
 	b.esp = esp
 	log.Infoln("device node for ESP:", b.espDevPath())
-
 	return nil
 }
 
-func (b *encryptCloudImageBase) mount(devPath, mountPath string) error {
-	unmount, err := mount(devPath, mountPath)
+func (b *encryptCloudImageBase) mount(devPath, mountPath, fs string) error {
+	unmount, err := mount(devPath, mountPath, fs)
 	if err != nil {
 		return err
 	}
@@ -323,7 +266,7 @@ func (b *encryptCloudImageBase) mountRoot() (path string, err error) {
 
 	log.Infoln("mounting root filesystem to", path)
 
-	if err := b.mount(b.rootDevPath(), path); err != nil {
+	if err := b.mount(b.rootDevPath(), path, "ext4"); err != nil {
 		return "", xerrors.Errorf("cannot mount rootfs: %w", err)
 	}
 
@@ -338,7 +281,7 @@ func (b *encryptCloudImageBase) mountESP() (path string, err error) {
 
 	log.Infoln("mounting ESP to", path)
 
-	if err := b.mount(b.espDevPath(), path); err != nil {
+	if err := b.mount(b.espDevPath(), path, "vfat"); err != nil {
 		return "", xerrors.Errorf("cannot mount ESP: %w", err)
 	}
 
