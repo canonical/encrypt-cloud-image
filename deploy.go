@@ -468,24 +468,12 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 		return xerrors.Errorf("cannot obtain source file information: %w", err)
 	}
 
-	if fi.Mode()&os.ModeDevice != 0 {
-		// Source file is a block device
-		d.devPath = opts.Positional.Input
-		if d.isNbdDevice() {
-			if err := d.checkNbdPreRequisites(); err != nil {
-				return err
-			}
-		}
-
-		return d.deployImageOnDevice()
-	}
-
-  	rootPartitionUniqueUUID := false
+   	rootPartitionUniqueUUID := false
         efiPartitionUniqueUUID := false
         if (opts.RootPartitionUUID != "") {
                 rootPartitionUniqueUUID = true
         }
-	if (opts.EfiPartitionUUID != "") {
+        if (opts.EfiPartitionUUID != "") {
                 efiPartitionUniqueUUID = true
         }
 
@@ -498,7 +486,19 @@ func (d *imageDeployer) run(opts *deployOptions) error {
                 return errors.New("Overrides for partition detection are supported only when specifying block device")
         }
 
-	// Source file is not a block device
+	if fi.Mode()&os.ModeDevice != 0 {
+		// Source file is a block device
+		d.devPath = opts.Positional.Input
+		if d.isNbdDevice() {
+			if err := d.checkNbdPreRequisites(); err != nil {
+				return err
+			}
+		}
+
+		return d.deployImageOnDevice()
+	}
+
+  	// Source file is not a block device
 	if err := d.checkNbdPreRequisites(); err != nil {
 		return err
 	}
