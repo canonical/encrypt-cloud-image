@@ -509,6 +509,23 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	if err := e.setupWorkingDir(); err != nil {
 		return err
 	}
+ 	rootPartitionUniqueUUID := false
+        efiPartitionUniqueUUID := false
+        if (opts.RootPartitionUUID != "") {
+                rootPartitionUniqueUUID = true
+        }
+        if (opts.EfiPartitionUUID != "") {
+                efiPartitionUniqueUUID = true
+        }
+
+        if ((rootPartitionUniqueUUID == true && efiPartitionUniqueUUID == false) ||
+            (rootPartitionUniqueUUID == false && efiPartitionUniqueUUID == true)) {
+                return errors.New("Please override both root and efi partititions")
+        }
+
+        if (rootPartitionUniqueUUID && fi.Mode()&os.ModeDevice == 0) {
+                return errors.New("Overrides for partition detection are supported only when specifying block device")
+        }
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
@@ -521,25 +538,7 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 		return e.encryptImageOnDevice()
 	}
 
-        rootPartitionUniqueUUID := false
-        efiPartitionUniqueUUID := false
-	if (opts.RootPartitionUUID != "") {
-		rootPartitionUniqueUUID = true
-	}
-	if (opts.EfiPartitionUUID != "") {
-		efiPartitionUniqueUUID = true
-	}
-
-	if ((rootPartitionUniqueUUID == true && efiPartitionUniqueUUID == false) ||
-	    (rootPartitionUniqueUUID == false && efiPartitionUniqueUUID == true)) {
-		return errors.New("Please override both root and efi partititions")
-	}
-
-	if (rootPartitionUniqueUUID && fi.Mode()&os.ModeDevice == 0) {
-		return errors.New("Overrides for partition detection are supported only when specifying block device")
-	}
-
-	// Input file is not a block device
+        // Input file is not a block device
 	if err := e.checkNbdPreRequisites(); err != nil {
 		return err
 	}
