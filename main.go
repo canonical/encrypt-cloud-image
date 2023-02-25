@@ -227,7 +227,7 @@ func (b *encryptCloudImageBase) detectPartitions(rootPartitionUUID string, efiPa
 	if (rootPartitionUUID != "") {
 		root = partitions.FindByPartitionUniqueUUID(rootPartitionUUID)
 		if root == nil {
-			return fmt.Errorf("cannot find partition by partition name %s", rootPartitionUUID)
+			return fmt.Errorf("cannot find partition by partition uuid %v on %s ", rootPartitionUUID, b.devPath)
 		}
 	} else {
 		// XXX: Could there be more than one partition with this type?
@@ -244,12 +244,12 @@ func (b *encryptCloudImageBase) detectPartitions(rootPartitionUUID string, efiPa
 	if (efiPartitionUUID != "") {
  		esp = partitions.FindByPartitionUniqueUUID(efiPartitionUUID)
                 if esp == nil {
-                        return fmt.Errorf("cannot find partition with the type %v on %s", efiPartitionUUID, b.devPath)
+                        return fmt.Errorf("cannot find partition with partition uuid %v on %s", efiPartitionUUID, b.devPath)
 		}
 	} else {
 		esp = partitions.FindByPartitionType(espGUID)
 		if esp == nil {
-			return fmt.Errorf("cannot find partition by partition name %v on %s", espGUID, b.devPath)
+			return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, b.devPath)
 		}
 	}
 
