@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/canonical/go-efilib"
-
 	"golang.org/x/xerrors"
 )
 
@@ -41,6 +40,21 @@ type PartitionEntry struct {
 }
 
 type Partitions []*PartitionEntry
+
+func (partitions Partitions) FindByPartitionUniqueUUID (s string) *PartitionEntry {
+	t, err := efi.DecodeGUIDString(s)
+	if err != nil {
+		return nil
+	}
+
+	for _,p := range partitions {
+		if p.UniquePartitionGUID == t {
+			return p
+		}
+	}
+
+	return nil
+}
 
 func (partitions Partitions) FindByPartitionType(t efi.GUID) *PartitionEntry {
 	for _, p := range partitions {
