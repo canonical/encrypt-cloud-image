@@ -49,7 +49,8 @@ type deployOptions struct {
 	AddEFIBootManagerProfile bool   `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
 	AddEFISecureBootProfile  bool   `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
 	AddUbuntuKernelProfile   bool   `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
-
+        RootPartitionUUID string `long:"root-partition-uuid" description:"Override to explicitly override the root partition"`
+        EfiPartitionUUID string  `long:"efi-partition-uuid"  description:"Override to explicitly override the efi partition"`
 	AzDiskProfile string `long:"az-disk-profile" description:""`
 	UefiConfig    string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
 
@@ -378,7 +379,7 @@ func (d *imageDeployer) deployImageOnDevice() error {
 		return err
 	}
 
-	if err := d.detectPartitions(); err != nil {
+	if err := d.detectPartitions(d.opts.RootPartitionUUID, d.opts.EfiPartitionUUID); err != nil {
 		return err
 	}
 
@@ -467,6 +468,24 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 		return xerrors.Errorf("cannot obtain source file information: %w", err)
 	}
 
+   	rootPartitionUniqueUUID := false
+        efiPartitionUniqueUUID := false
+        if (opts.RootPartitionUUID != "") {
+                rootPartitionUniqueUUID = true
+        }
+        if (opts.EfiPartitionUUID != "") {
+                efiPartitionUniqueUUID = true
+        }
+
+        if ((rootPartitionUniqueUUID == true && efiPartitionUniqueUUID == false) ||
+            (rootPartitionUniqueUUID == false && efiPartitionUniqueUUID == true)) {
+                return errors.New("Please override both root and efi partititions")
+        }
+
+        if (rootPartitionUniqueUUID && fi.Mode()&os.ModeDevice == 0) {
+                return errors.New("Overrides for partition detection are supported only when specifying block device")
+        }
+
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Source file is a block device
 		d.devPath = opts.Positional.Input
@@ -479,7 +498,7 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 		return d.deployImageOnDevice()
 	}
 
-	// Source file is not a block device
+  	// Source file is not a block device
 	if err := d.checkNbdPreRequisites(); err != nil {
 		return err
 	}
