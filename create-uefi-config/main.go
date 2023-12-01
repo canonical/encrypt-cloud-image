@@ -73,7 +73,7 @@ func populateConfigFromVars(config *efienv.Config) error {
 			dest: &config.Dbx,
 		},
 	} {
-		b, _, err := efi.ReadVar(v.name, v.guid)
+		b, _, err := efi.ReadVariable(v.name, v.guid)
 		if err != nil && err != efi.ErrVarNotExist {
 			return xerrors.Errorf("cannot read %s variable: %w", v.name, err)
 		}
