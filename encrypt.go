@@ -373,6 +373,11 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 		return err
 	}
 
+	if e.isEncrypted() {
+		log.Infoln("this device is already encrypted, skipping encryption for", e.devPath)
+		return nil
+	}
+
 	var growPartKey [32]byte
 	if !e.opts.GrowRoot {
 		if _, err := rand.Read(growPartKey[:]); err != nil {
@@ -530,4 +535,15 @@ func init() {
 	if _, err := parser.AddCommand("encrypt", "Encrypt an image without protecting the key to a specific guest instance", "", &encryptOptions{}); err != nil {
 		log.WithError(err).Panicln("cannot add encrypt command")
 	}
+}
+
+func (e *imageEncrypter) isEncrypted() bool {
+	path := e.rootDevPath()
+	cmd := internal_exec.LoggedCommand("cryptsetup", "isLuks", path)
+
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	return true
 }
