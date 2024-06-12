@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
@@ -47,9 +47,10 @@ const (
 )
 
 var (
-	Version             = "v1.0.1"
-	espGUID             = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
-	linuxFilesystemGUID = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
+	Version                      = "v1.0.1"
+	espGUID                      = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
+	linuxFilesystemGUID          = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
+	rootVerityPartitionAmd64GUID = efi.MakeGUID(0x2C7357ED, 0xEBD2, 0x46D9, 0xAEC1, [...]uint8{0x23, 0xD4, 0x37, 0xEC, 0x2B, 0xF5})
 )
 
 type options struct {
@@ -82,6 +83,7 @@ type encryptCloudImageBase struct {
 	partitions    gpt.Partitions
 	rootPartition *gpt.PartitionEntry
 	esp           *gpt.PartitionEntry
+	verity        *gpt.PartitionEntry
 }
 
 func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
@@ -140,6 +142,19 @@ func (b *encryptCloudImageBase) espDevPath() string {
 	}
 
 	return fmt.Sprintf(devPathFormat, b.devPath, b.esp.Index)
+}
+
+func (b *encryptCloudImageBase) verityDevPath() string {
+	if b.verity == nil {
+		log.Panicln("missing call to detectPartitions")
+	}
+
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, b.verity.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {
@@ -239,6 +254,15 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	log.Debugln("ESP on", b.devPath, ":", esp)
 	b.esp = esp
 	log.Infoln("device node for ESP:", b.espDevPath())
+
+	verity := partitions.FindByPartitionName("cloudimg-rootfs-verity")
+	if verity == nil {
+		return fmt.Errorf("cannot find partition with the type %v on %s", rootVerityPartitionAmd64GUID, b.devPath)
+	}
+	log.Debugln("Root verity partition on", b.devPath, ":", verity)
+	b.verity = verity
+	log.Infoln("device node for verity:", b.verityDevPath())
+
 	return nil
 }
 
