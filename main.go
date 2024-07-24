@@ -79,6 +79,8 @@ type encryptCloudImageBase struct {
 
 	workingDir string
 	devPath    string
+	conn       *nbd.Connection
+	imagePath  string
 
 	partitions    gpt.Partitions
 	rootPartition *gpt.PartitionEntry
@@ -216,17 +218,21 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 	if err != nil {
 		return xerrors.Errorf("cannot connect %s to NBD device: %w", path, err)
 	}
+	b.conn = conn
+	b.imagePath = path
 	b.devPath = conn.DevPath()
 	log.Infoln("connected", path, "to", conn.DevPath())
 
-	b.addCleanup(func() error {
-		log.Debugln("disconnecting", conn.DevPath())
-		if err := conn.Disconnect(); err != nil {
-			return xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)
-		}
-		return nil
-	})
+	b.addCleanup(b.disconnectNbd)
 
+	return nil
+}
+
+func (b *encryptCloudImageBase) disconnectNbd() error {
+	log.Debugln("disconnecting", b.conn.DevPath())
+	if err := b.conn.Disconnect(); err != nil {
+		return fmt.Errorf("cannot disconnect from %s: %w", b.conn.DevPath(), err)
+	}
 	return nil
 }
 
