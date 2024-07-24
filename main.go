@@ -148,7 +148,7 @@ func (b *encryptCloudImageBase) espDevPath() string {
 
 func (b *encryptCloudImageBase) verityDevPath() string {
 	if b.verity == nil {
-		log.Panicln("missing call to detectPartitions")
+		return ""
 	}
 
 	devPathFormat, err := b.getDevPathFormat()
@@ -261,10 +261,9 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	b.esp = esp
 	log.Infoln("device node for ESP:", b.espDevPath())
 
+	// This can be return nil if a verity partition is not found in the image. This will be handled later
+	// by creating the needed partition.
 	verity := partitions.FindByPartitionName("cloudimg-rootfs-verity")
-	if verity == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", rootVerityPartitionAmd64GUID, b.devPath)
-	}
 	log.Debugln("Root verity partition on", b.devPath, ":", verity)
 	b.verity = verity
 	log.Infoln("device node for verity:", b.verityDevPath())
