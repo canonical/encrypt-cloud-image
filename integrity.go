@@ -27,8 +27,10 @@ import (
 	"path/filepath"
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
+	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 	log "github.com/sirupsen/logrus"
 
 	snapd_dmverity "github.com/snapcore/snapd/snap/integrity/dmverity"
@@ -36,7 +38,7 @@ import (
 )
 
 const (
-	verityPartitionNum = 13
+	verityPartitionNum = 2
 )
 
 type integrityOptions struct {
@@ -60,20 +62,65 @@ type imageIntegrityProtector struct {
 	verityPartition *gpt.PartitionEntry
 }
 
-func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string, string, error) {
+func (i *imageIntegrityProtector) prepareRootPartition() error {
 	devPath := i.rootDevPath()
 
-	verityFilePath := filepath.Join(i.workingDirPath(), "rootfs.verity")
+	log.Infoln("shrinking fileystem on", devPath)
+	if err := shrinkExtFS(devPath); err != nil {
+		return fmt.Errorf("cannot shrink filesystem: %w", err)
+	}
 
-	// Run fsck on root partition before calculating verity data
+	// If the image has been booted before, filesystem errors that will
+	// be corrected on boot might cause verity errors.
+	log.Infoln("running checks on", devPath)
 	cmd := internal_exec.LoggedCommand("fsck", "-p", devPath)
 
 	if err := cmd.Run(); err != nil {
-		return "", "", err
+		return err
 	}
 
+	log.Infoln("resizing partition", devPath)
+
+	blockCount, err := fs.GetBlockCount(devPath)
+	if err != nil {
+		return err
+	}
+
+	fsSize := blockCount * fs.BlockSize
+	// gpt.BlockSize corresponds to the sector size
+	fsSectors := fsSize / gpt.BlockSize
+	numSectorsAligned := ((fsSectors-1)/2048 + 1) * 2048
+	endingLBA := uint64(i.rootPartition.StartingLBA) + numSectorsAligned - 1
+
+	log.Infoln("disconnecting", i.imagePath, "for repartitioning")
+	if err := i.disconnectNbd(); err != nil {
+		return err
+	}
+
+	cmd = internal_exec.LoggedCommand("sgdisk",
+		i.imagePath,
+		"--delete",
+		fmt.Sprintf("%d", 1),
+		"--new",
+		fmt.Sprintf("%d:%d:%d", 1, i.rootPartition.StartingLBA, endingLBA),
+	)
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	if err := i.reconnectNbd(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string, string, error) {
+	verityFilePath := filepath.Join(i.workingDirPath(), "rootfs.verity")
+
 	log.Infoln("generating verity data for root partition")
-	verityInfo, err := snapd_dmverity.Format(devPath, verityFilePath)
+	verityInfo, err := snapd_dmverity.Format(i.rootDevPath(), verityFilePath)
 	if err != nil {
 		return "", "", err
 	}
@@ -81,16 +128,97 @@ func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string,
 	return verityInfo.RootHash, verityFilePath, nil
 }
 
-func (i *imageIntegrityProtector) updateVerityPartition(verityFilePath string) error {
-	log.Infoln("updating verity partition ", i.verityDevPath())
-
-	// XXX: this is a hack that populates the verity partition index which is used
-	// by verityDevPath() in the dd command below. This is needed as the new
-	// partition cannot be discovered unless the disk is remounted.
-	i.verity = &gpt.PartitionEntry{
-		Index: verityPartitionNum,
+func (i *imageIntegrityProtector) reconnectNbd() error {
+	// This is used to to enable reconnecting to the device
+	// after a manual disconnection without having to manipulate
+	// the cleanup handlers. The cleanup handler that was set up
+	// after calling connectNbd() will automatically cleanup the
+	// new connection instead.
+	if i.conn == nil {
+		panic("no existing connection found")
 	}
 
+	log.Infoln("Reconnecting", i.imagePath)
+
+	conn, err := nbd.ConnectImage(i.imagePath)
+	if err != nil {
+		return fmt.Errorf("cannot connect %s to NBD device: %w", i.imagePath, err)
+	}
+
+	i.conn = conn
+	i.devPath = conn.DevPath()
+
+	log.Infoln("connected", i.imagePath, "to", i.conn.DevPath())
+
+	return nil
+}
+
+func (i *imageIntegrityProtector) repartitionDiskForVerityPartition(size uint64) error {
+	if i.verity != nil {
+		partitionSize := uint64(i.verity.EndingLBA - i.verity.StartingLBA)
+
+		if partitionSize >= size {
+			return nil
+		}
+	}
+
+	log.Infoln("disconnecting", i.imagePath, "for repartitioning")
+	if err := i.disconnectNbd(); err != nil {
+		return err
+	}
+
+	if i.verity != nil {
+		cmd := internal_exec.LoggedCommand("sgdisk",
+			i.imagePath,
+			"--delete",
+			fmt.Sprintf("%d", verityPartitionNum),
+		)
+
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+
+	// create new partition
+
+	// align to the next 2048-sector boundary
+	verityPartitionStart := i.rootPartition.EndingLBA/2048*2048 + 2048
+
+	cmd := internal_exec.LoggedCommand("sgdisk",
+		i.imagePath,
+		"--move-second-header",
+		"--new",
+		fmt.Sprintf("%d:%d:+%dK", verityPartitionNum, verityPartitionStart, size/1024),
+		"--typecode",
+		fmt.Sprintf("%d:%s", verityPartitionNum, rootVerityPartitionAmd64GUID),
+		"--change-name",
+		fmt.Sprintf("%d:%s", verityPartitionNum, "cloudimg-rootfs-verity"),
+	)
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	if err := i.reconnectNbd(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (i *imageIntegrityProtector) createOrUpdateVerityPartition(verityFilePath string) error {
+	fi, err := os.Stat(verityFilePath)
+	if err != nil {
+		return err
+	}
+	veritySize := uint64(fi.Size())
+
+	err = i.repartitionDiskForVerityPartition(veritySize)
+	if err != nil {
+		return err
+	}
+
+	// Copy data to verity partition
 	cmd := internal_exec.LoggedCommand("dd",
 		"if="+verityFilePath,
 		"of="+i.verityDevPath(),
@@ -126,6 +254,10 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 		return err
 	}
 
+	if err := i.prepareRootPartition(); err != nil {
+		return err
+	}
+
 	rootHash, verityFilePath, err := i.createIntegrityDataForRootPartition()
 	if err != nil {
 		return err
@@ -133,7 +265,7 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 
 	log.Infoln("dm-verity root hash for the root partition: ", rootHash)
 
-	err = i.updateVerityPartition(verityFilePath)
+	err = i.createOrUpdateVerityPartition(verityFilePath)
 	if err != nil {
 		return err
 	}
@@ -154,6 +286,7 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 	if err != nil {
 		return err
 	}
+	log.Infoln("manifest.json:", string(imJson))
 
 	espPath, err := i.mountESP()
 	if err != nil {
@@ -161,8 +294,8 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 	}
 
 	ukiRootPath := filepath.Join(espPath, "EFI/ubuntu")
-	log.Infoln("creating manifest under", ukiRootPath)
 
+	log.Infoln("creating manifest under", ukiRootPath)
 	if err := os.WriteFile(filepath.Join(ukiRootPath, "manifest.json"), imJson, 0644); err != nil {
 		return xerrors.Errorf("cannot create manifest file: %w", err)
 	}
