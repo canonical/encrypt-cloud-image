@@ -200,7 +200,7 @@ func (i *imageIntegrityProtector) createOrUpdateVerityPartition(verityFilePath s
 
 // These match the structs in snap-bootstrap
 type ImageManifestPartition struct {
-	FsLabel  string `json:"label"`
+	GptLabel string `json:"label"`
 	RootHash string `json:"root_hash"`
 	Overlay  string `json:"overlay"`
 }
@@ -240,7 +240,7 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 	log.Infoln("generating manifest with integrity information for image on", i.devPath)
 
 	partition := ImageManifestPartition{
-		FsLabel:  "cloudimg-rootfs",
+		GptLabel: "cloudimg-rootfs",
 		RootHash: rootHash,
 		Overlay:  "lowerdir",
 	}
