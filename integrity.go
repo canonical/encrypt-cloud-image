@@ -30,7 +30,6 @@ import (
 	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
-	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 	log "github.com/sirupsen/logrus"
 
 	snapd_dmverity "github.com/snapcore/snapd/snap/integrity/dmverity"
@@ -92,28 +91,23 @@ func (i *imageIntegrityProtector) prepareRootPartition() error {
 	numSectorsAligned := ((fsSectors-1)/2048 + 1) * 2048
 	endingLBA := uint64(i.rootPartition.StartingLBA) + numSectorsAligned - 1
 
-	log.Infoln("disconnecting", i.imagePath, "for repartitioning")
-	if err := i.disconnectNbd(); err != nil {
-		return err
+	action := func() error {
+		cmd = internal_exec.LoggedCommand("sgdisk",
+			i.imagePath,
+			"--delete",
+			fmt.Sprintf("%d", 1),
+			"--new",
+			fmt.Sprintf("%d:%d:%d", 1, i.rootPartition.StartingLBA, endingLBA),
+		)
+
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	cmd = internal_exec.LoggedCommand("sgdisk",
-		i.imagePath,
-		"--delete",
-		fmt.Sprintf("%d", 1),
-		"--new",
-		fmt.Sprintf("%d:%d:%d", 1, i.rootPartition.StartingLBA, endingLBA),
-	)
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	if err := i.reconnectNbd(); err != nil {
-		return err
-	}
-
-	return nil
+	return i.repartition(action)
 }
 
 func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string, string, error) {
@@ -128,82 +122,44 @@ func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string,
 	return verityInfo.RootHash, verityFilePath, nil
 }
 
-func (i *imageIntegrityProtector) reconnectNbd() error {
-	// This is used to to enable reconnecting to the device
-	// after a manual disconnection without having to manipulate
-	// the cleanup handlers. The cleanup handler that was set up
-	// after calling connectNbd() will automatically cleanup the
-	// new connection instead.
-	if i.conn == nil {
-		panic("no existing connection found")
-	}
+func (i *imageIntegrityProtector) createVerityPartition(size uint64) error {
+	action := func() error {
+		if i.verity != nil {
+			cmd := internal_exec.LoggedCommand("sgdisk",
+				i.imagePath,
+				"--delete",
+				fmt.Sprintf("%d", verityPartitionNum),
+			)
 
-	log.Infoln("Reconnecting", i.imagePath)
-
-	conn, err := nbd.ConnectImage(i.imagePath)
-	if err != nil {
-		return fmt.Errorf("cannot connect %s to NBD device: %w", i.imagePath, err)
-	}
-
-	i.conn = conn
-	i.devPath = conn.DevPath()
-
-	log.Infoln("connected", i.imagePath, "to", i.conn.DevPath())
-
-	return nil
-}
-
-func (i *imageIntegrityProtector) repartitionDiskForVerityPartition(size uint64) error {
-	if i.verity != nil {
-		partitionSize := uint64(i.verity.EndingLBA - i.verity.StartingLBA)
-
-		if partitionSize >= size {
-			return nil
+			if err := cmd.Run(); err != nil {
+				return err
+			}
 		}
-	}
 
-	log.Infoln("disconnecting", i.imagePath, "for repartitioning")
-	if err := i.disconnectNbd(); err != nil {
-		return err
-	}
+		// create new partition
 
-	if i.verity != nil {
+		// align to the next 2048-sector boundary
+		verityPartitionStart := i.rootPartition.EndingLBA/2048*2048 + 2048
+
 		cmd := internal_exec.LoggedCommand("sgdisk",
 			i.imagePath,
-			"--delete",
-			fmt.Sprintf("%d", verityPartitionNum),
+			"--move-second-header",
+			"--new",
+			fmt.Sprintf("%d:%d:+%dK", verityPartitionNum, verityPartitionStart, size/1024),
+			"--typecode",
+			fmt.Sprintf("%d:%s", verityPartitionNum, rootVerityPartitionAmd64GUID),
+			"--change-name",
+			fmt.Sprintf("%d:%s", verityPartitionNum, "cloudimg-rootfs-verity"),
 		)
 
 		if err := cmd.Run(); err != nil {
 			return err
 		}
+
+		return nil
 	}
 
-	// create new partition
-
-	// align to the next 2048-sector boundary
-	verityPartitionStart := i.rootPartition.EndingLBA/2048*2048 + 2048
-
-	cmd := internal_exec.LoggedCommand("sgdisk",
-		i.imagePath,
-		"--move-second-header",
-		"--new",
-		fmt.Sprintf("%d:%d:+%dK", verityPartitionNum, verityPartitionStart, size/1024),
-		"--typecode",
-		fmt.Sprintf("%d:%s", verityPartitionNum, rootVerityPartitionAmd64GUID),
-		"--change-name",
-		fmt.Sprintf("%d:%s", verityPartitionNum, "cloudimg-rootfs-verity"),
-	)
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	if err := i.reconnectNbd(); err != nil {
-		return err
-	}
-
-	return nil
+	return i.repartition(action)
 }
 
 func (i *imageIntegrityProtector) createOrUpdateVerityPartition(verityFilePath string) error {
@@ -213,12 +169,23 @@ func (i *imageIntegrityProtector) createOrUpdateVerityPartition(verityFilePath s
 	}
 	veritySize := uint64(fi.Size())
 
-	err = i.repartitionDiskForVerityPartition(veritySize)
-	if err != nil {
-		return err
+	create := true
+	if i.verity != nil {
+		partitionSize := uint64(i.verity.EndingLBA - i.verity.StartingLBA)
+
+		if partitionSize >= veritySize {
+			create = false
+		}
 	}
 
-	// Copy data to verity partition
+	if create {
+		if err = i.createVerityPartition(veritySize); err != nil {
+			return err
+		}
+	}
+
+	// Update verity partition
+
 	cmd := internal_exec.LoggedCommand("dd",
 		"if="+verityFilePath,
 		"of="+i.verityDevPath(),

@@ -230,6 +230,31 @@ func (b *encryptCloudImageBase) disconnectNbd() error {
 	return nil
 }
 
+func (b *encryptCloudImageBase) reconnectNbd() error {
+	// This is used to to enable reconnecting to the device
+	// after a manual disconnection without having to manipulate
+	// the cleanup handlers. The cleanup handler that was set up
+	// after calling connectNbd() will automatically cleanup the
+	// new connection instead.
+	if b.conn == nil {
+		panic("no existing connection found")
+	}
+
+	log.Infoln("Reconnecting", b.imagePath)
+
+	conn, err := nbd.ConnectImage(b.imagePath)
+	if err != nil {
+		return fmt.Errorf("cannot connect %s to NBD device: %w", b.imagePath, err)
+	}
+
+	b.conn = conn
+	b.devPath = conn.DevPath()
+
+	log.Infoln("connected", b.imagePath, "to", b.conn.DevPath())
+
+	return nil
+}
+
 func (b *encryptCloudImageBase) detectPartitions() error {
 	partitions, err := gpt.ReadPartitionTable(b.devPath)
 	if err != nil {
@@ -261,6 +286,29 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	log.Debugln("Root verity partition on", b.devPath, ":", verity)
 	b.verity = verity
 	log.Infoln("device node for verity:", b.verityDevPath())
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) repartition(action func() error) error {
+	log.Infoln("disconnecting", b.imagePath, "for repartitioning")
+	if err := b.disconnectNbd(); err != nil {
+		return err
+	}
+
+	if err := action(); err != nil {
+		return err
+	}
+
+	log.Infoln("reconnecting", b.imagePath)
+	if err := b.reconnectNbd(); err != nil {
+		return err
+	}
+
+	log.Infoln("re-detecting partitions of ", b.imagePath)
+	if err := b.detectPartitions(); err != nil {
+		return err
+	}
 
 	return nil
 }
