@@ -98,6 +98,8 @@ func (i *imageIntegrityProtector) prepareRootPartition() error {
 			fmt.Sprintf("%d", 1),
 			"--new",
 			fmt.Sprintf("%d:%d:%d", 1, i.rootPartition.StartingLBA, endingLBA),
+			"--change-name",
+			fmt.Sprintf("%d:%s", 1, "cloudimg-rootfs"),
 		)
 
 		if err := cmd.Run(); err != nil {
