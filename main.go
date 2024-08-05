@@ -98,6 +98,15 @@ func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 	}
 }
 
+func (b *encryptCloudImageBase) getDevPath(i int) string {
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, i)
+}
+
 func (b *encryptCloudImageBase) isNbdDevice() bool {
 	return strings.HasPrefix(b.devPath, "/dev/nbd")
 }
@@ -125,12 +134,7 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 		log.Panicln("missing call to detectPartitions")
 	}
 
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
-	}
-
-	return fmt.Sprintf(devPathFormat, b.devPath, b.rootPartition.Index)
+	return b.getDevPath(b.rootPartition.Index)
 }
 
 func (b *encryptCloudImageBase) espDevPath() string {
@@ -138,12 +142,7 @@ func (b *encryptCloudImageBase) espDevPath() string {
 		log.Panicln("missing call to detectPartitions")
 	}
 
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
-	}
-
-	return fmt.Sprintf(devPathFormat, b.devPath, b.esp.Index)
+	return b.getDevPath(b.esp.Index)
 }
 
 func (b *encryptCloudImageBase) verityDevPath() string {
@@ -151,12 +150,7 @@ func (b *encryptCloudImageBase) verityDevPath() string {
 		return ""
 	}
 
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
-	}
-
-	return fmt.Sprintf(devPathFormat, b.devPath, b.verity.Index)
+	return b.getDevPath(b.verity.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {
