@@ -17,7 +17,7 @@ import datetime
 ############################################################
 
 # Product name
-project = 'Documentation starter pack'
+project = 'encrypt-cloud-image'
 author = 'Canonical Ltd.'
 
 # The title you want to display for the documentation in the sidebar.
@@ -164,7 +164,7 @@ linkcheck_anchors_ignore_for_url = [
 # By default, the following MyST extensions are enabled:
 # substitution, deflist, linkify
 # If you need more extensions, add them here.
-# myst_enable_extensions = set()
+myst_enable_extensions = set(["attrs_block", "attrs_inline", "colon_fence"])
 
 # You must include the canonical_sphinx extension here.
 # This extension automatically enables the following Sphinx extensions:

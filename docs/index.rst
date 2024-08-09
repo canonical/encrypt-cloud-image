@@ -1,24 +1,17 @@
-Starter pack
-============
+encrypt-cloud-image
+===================
 
-**A single sentence that says what the product is, succinctly and memorably.**
-Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua.
+encrypt-cloud-image provides tooling for provisioning cloud images for use in
+confidential VMs.
 
-**A paragraph of one to three short sentences, that describe what the product
-does.** Urna cursus eget nunc scelerisque viverra mauris in. Nibh mauris
-cursus mattis molestie a iaculis at vestibulum rhoncus est pellentesque
-elit. Diam phasellus vestibulum lorem sed.
+It provides functionality for integrity protecting the rootfs of a given image
+using dm-verity, encrypting the rootfs and binding the decryption process to
+a specific TPM using a profile which describes the state that the system must
+be in in order to decrypt the key.
 
-**A third paragraph of similar length, this time explaining what need the
-product meets.** Dui ut ornare lectus sit amet est. Nunc sed augue lacus
-viverra vitae congue eu consequat ac libero id faucibus nisl tincidunt eget
-nullam.
-
-**Finally, a paragraph that describes whom the product is useful for.** Nunc
-non blandit massa enim nec dui nunc mattis enim. Ornare arcu odio ut sem
-nulla pharetra diam porttitor leo a diam sollicitudin tempor id eu. Ipsum
-dolor sit amet consectetur adipiscing elit pellentesque habitant.
+This is meant to be used either as part of a CVM provisioning pipeline by
+a cloud provider or to locally produce pre-encrypted golden images so that
+they can be deployed directly to the cloud.
 
 ---------
 
@@ -27,22 +20,22 @@ In this documentation
 
 ..  grid:: 1 1 2 2
 
-   ..  grid-item:: :doc:`Tutorial </index>`
+   ..  grid-item:: :doc:`Tutorials <tutorials/index>`
 
-       **Start here**: a hands-on introduction to Example Product for new users
+       **Start here**: a hands-on introduction to encrypt-cloud-image for new users
 
-   ..  grid-item:: :doc:`How-to guides </index>`
+   ..  grid-item:: :doc:`How-to guides <howto/index>`
 
       **Step-by-step guides** covering key operations and common tasks
 
 .. grid:: 1 1 2 2
    :reverse:
 
-   .. grid-item:: :doc:`Reference </index>`
+   .. grid-item:: :doc:`Reference <reference/index>`
 
       **Technical information** - specifications, APIs, architecture
 
-   .. grid-item:: :doc:`Explanation </index>`
+   .. grid-item:: :doc:`Explanation <explanation/index>`
 
       **Discussion and clarification** of key topics
 
@@ -51,14 +44,14 @@ In this documentation
 Project and community
 ---------------------
 
-Example Project is a member of the Ubuntu family. It’s an open source project that warmly welcomes community projects, contributions, suggestions, fixes and constructive feedback.
+encrypt-cloud-image is a member of the Ubuntu family. It’s an open source project that warmly welcomes community projects, contributions, suggestions, fixes and constructive feedback.
 
 * Code of conduct
 * Get support
 * Join our online chat
 * Contribute
 * Roadmap
-* Thinking about using Example Product for your next project? Get in touch!
+* Thinking about using encrypt-cloud-image for your next project? Get in touch!
 
 
 .. toctree::
@@ -66,3 +59,7 @@ Example Project is a member of the Ubuntu family. It’s an open source project 
    :maxdepth: 2
 
    self
+   tutorials/index
+   howto/index
+   reference/index
+   explanation/index
