@@ -7,8 +7,15 @@ and an tmpfs-based writable partition as the upper one.
 
 To produce such an image from a source image the following steps are required:
 
-1. invoke `integrity-protect` with the `--writable` argument to create a verity partition and
-   a writable one:
+1. invoke `integrity-protect` to create a verity partition:
 ```bash
-sudo encrypt-cloud-image integrity-protect $input
+sudo encrypt-cloud-image integrity-protect input.vhd
+
+# This is the final image
+mv input.vhd final.vhd
 ```
+
+For more information about each command and their arguments please refer to their respective
+[reference pages](../reference/index).
+
+For more information about the booting process, see [](../reference/architecture.md).

@@ -59,7 +59,7 @@ $ cat esp/EFI/ubuntu/manifest.json | jq
 
 An image that is integrity protected is meant to be booted using an overlayfs mount for
 the rootfs which uses a read-only dm-verity protected partition as the lower filesystem
-and a tmpfs-based writable partition for the upper. See [Booting](../explanation/booting.md)
+and a tmpfs-based writable partition for the upper. See [](../reference/architecture.md)
 for more information.
 
 ## Using a writable partition
@@ -107,10 +107,21 @@ $ cat esp/EFI/ubuntu/manifest.json | jq
 ```
 
 This will instruct the booting process to use the writable partition from the disk instead of
-an ephemeral tmpfs one. See [Booting](../explanation/booting.md) for more information.
+an ephemeral tmpfs one. See [](../reference/architecture.md) for more information.
 
 ```{important}
 For the confidential computing model, the writable partition must be protected, for instance
 using a workflow like the one described in [integrity then encrypt](../howto/integrity-then-encrypt).
 ```
 
+## Options
+
+### Override cloud-init datasources
+It may be desirable to override an image's enabled cloud-init datasources to facilitate debugging the final image in QEMU.
+To enable only the NoCloud datasource so that an image can be initialized with user data from a separate seed image:
+```bash
+$ sudo encrypt-cloud-image integrity-protect \
+                                    --override-datasources "NoCloud" \
+                                    <input_image>
+```
+The `--override-datasources` option takes a comma-delimited list of datasources.

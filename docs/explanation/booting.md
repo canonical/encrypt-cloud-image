@@ -1,2 +1,0 @@
-(booting)=
-# Booting process
