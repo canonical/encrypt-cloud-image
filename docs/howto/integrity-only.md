@@ -19,3 +19,28 @@ For more information about each command and their arguments please refer to thei
 [reference pages](../reference/index).
 
 For more information about the booting process, see [](../reference/architecture.md).
+
+````{note}
+Although setting up a vTPM is not a requirement for the provisioning process of an integrity-protected only image,
+an image like this is booted using a manifest to retrieve partition information and the dm-verity root hash of the
+root partition. This manifest will also be measured to a vTPM if one is available.
+
+You can run a vTPM such as swtpm like:
+
+```bash
+mkdir /tmp/mytpm0
+swtpm socket --server type=unixio,path=/tmp/mytpm0/swtpm-sock \
+             --ctrl type=unixio,path=/tmp/mytpm0/swtpm-sock.ctrl,mode=0600 \
+             --tpmstate dir=/tmp/mytpm0 \
+             --tpm2 \
+             --flags not-need-init,startup-clear
+```
+
+A primary key also needs to be initialized like:
+
+```bash
+export TPM2TOOLS_TCTI="swtpm:path=/tmp/mytpm0/swtpm-sock"
+tpm2_createprimary
+```
+
+````
