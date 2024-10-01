@@ -131,6 +131,8 @@ func (i *imageIntegrityProtector) createIntegrityDataForRootPartition() (string,
 func (i *imageIntegrityProtector) createVerityPartition(size uint64) error {
 	action := func() error {
 		if i.verity != nil {
+			log.Infoln("deleting existing verity partition")
+
 			cmd := internal_exec.LoggedCommand("sgdisk",
 				i.imagePath,
 				"--delete",
@@ -142,7 +144,7 @@ func (i *imageIntegrityProtector) createVerityPartition(size uint64) error {
 			}
 		}
 
-		// create new partition
+		log.Infoln("creating a new verity partition")
 
 		// align to the next 2048-sector boundary
 		verityPartitionStart := i.rootPartition.EndingLBA/2048*2048 + 2048
