@@ -53,6 +53,14 @@ func (o *integrityOptions) Execute(_ []string) error {
 	return d.run(o)
 }
 
+func sectorsFromBlocks(blockCount uint64) uint64 {
+	fsSize := blockCount * fs.BlockSize
+	// gpt.BlockSize corresponds to the sector size
+	fsSectors := fsSize / gpt.BlockSize
+	// partitions are aligned to 2048-sector boundaries
+	return ((fsSectors-1)/2048 + 1) * 2048
+}
+
 type imageIntegrityProtector struct {
 	encryptCloudImageBase
 
@@ -85,11 +93,7 @@ func (i *imageIntegrityProtector) prepareRootPartition() error {
 		return err
 	}
 
-	fsSize := blockCount * fs.BlockSize
-	// gpt.BlockSize corresponds to the sector size
-	fsSectors := fsSize / gpt.BlockSize
-	numSectorsAligned := ((fsSectors-1)/2048 + 1) * 2048
-	endingLBA := uint64(i.rootPartition.StartingLBA) + numSectorsAligned - 1
+	endingLBA := uint64(i.rootPartition.StartingLBA) + sectorsFromBlocks(blockCount) - 1
 
 	action := func() error {
 		cmd = internal_exec.LoggedCommand("sgdisk",
