@@ -322,12 +322,12 @@ func (i *imageIntegrityProtector) run(opts *integrityOptions) error {
 	i.enterScope()
 	defer i.exitScope()
 
-	fi, err := os.Stat(opts.Positional.Input)
+	inputIsBlockDevice, err := fs.PathIsBlockDevice(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return err
 	}
 
-	if opts.Output != "" && fi.Mode()&os.ModeDevice != 0 {
+	if opts.Output != "" && inputIsBlockDevice {
 		return errors.New("cannot specify --output with a block device")
 	}
 
@@ -335,7 +335,7 @@ func (i *imageIntegrityProtector) run(opts *integrityOptions) error {
 		return err
 	}
 
-	if fi.Mode()&os.ModeDevice != 0 {
+	if inputIsBlockDevice {
 		// Source file is a block device
 		i.devPath = opts.Positional.Input
 		if i.isNbdDevice() {

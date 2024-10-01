@@ -41,6 +41,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
+	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
 
@@ -203,13 +204,13 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		log.Debugln("found kernel", path)
 		kernels = append(kernels, &secboot_efi.ImageLoadEvent{
 			Source: secboot_efi.Shim,
-			Image: secboot_efi.FileImage(path)})
+			Image:  secboot_efi.FileImage(path)})
 	}
 
 	loadSequences := &secboot_efi.ImageLoadEvent{
 		Source: secboot_efi.Firmware,
-		Image: secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
-		Next: kernels}
+		Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
+		Next:   kernels}
 
 	if d.opts.AddEFIBootManagerProfile {
 		log.Debugln("adding boot manager PCR profile")
@@ -462,12 +463,12 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 		return errors.New("cannot specify both --az-disk-profile and --uefi-config")
 	}
 
-	fi, err := os.Stat(opts.Positional.Input)
+	inputIsBlockDevice, err := fs.PathIsBlockDevice(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return err
 	}
 
-	if fi.Mode()&os.ModeDevice != 0 {
+	if inputIsBlockDevice {
 		// Source file is a block device
 		d.devPath = opts.Positional.Input
 		if d.isNbdDevice() {

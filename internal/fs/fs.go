@@ -2,6 +2,7 @@ package fs
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 
@@ -40,4 +41,13 @@ func GetBlockCount(devPath string) (uint64, error) {
 	}
 
 	return uint64(blockCount), nil
+}
+
+func PathIsBlockDevice(path string) (bool, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false, fmt.Errorf("cannot obtain source file information: %w", err)
+	}
+
+	return fi.Mode()&os.ModeDevice != 0, nil
 }

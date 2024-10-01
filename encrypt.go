@@ -38,6 +38,7 @@ import (
 	"golang.org/x/xerrors"
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
@@ -459,12 +460,12 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	e.enterScope()
 	defer e.exitScope()
 
-	fi, err := os.Stat(opts.Positional.Input)
+	inputIsBlockDevice, err := fs.PathIsBlockDevice(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return err
 	}
 
-	if opts.Output != "" && fi.Mode()&os.ModeDevice != 0 {
+	if opts.Output != "" && inputIsBlockDevice {
 		return errors.New("cannot specify --output with a block device")
 	}
 
@@ -472,7 +473,7 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 		return err
 	}
 
-	if fi.Mode()&os.ModeDevice != 0 {
+	if inputIsBlockDevice {
 		// Input file is a block device
 		e.devPath = opts.Positional.Input
 		if e.isNbdDevice() {
