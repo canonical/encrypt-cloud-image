@@ -237,7 +237,7 @@ func (b *encryptCloudImageBase) reconnectNbd() error {
 	// after calling connectNbd() will automatically cleanup the
 	// new connection instead.
 	if b.conn == nil {
-		panic("no existing connection found")
+		log.Fatal("no existing connection found")
 	}
 
 	log.Infoln("Reconnecting", b.imagePath)

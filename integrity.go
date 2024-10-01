@@ -106,11 +106,7 @@ func (i *imageIntegrityProtector) prepareRootPartition() error {
 			fmt.Sprintf("%d:%s", 1, "cloudimg-rootfs"),
 		)
 
-		if err := cmd.Run(); err != nil {
-			return err
-		}
-
-		return nil
+		return cmd.Run()
 	}
 
 	return i.repartition(action)
@@ -219,7 +215,7 @@ type ImageManifest struct {
 
 func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 	if i.devPath == "" {
-		panic("no device path")
+		log.Fatal("no device path")
 	}
 
 	i.enterScope()
@@ -240,8 +236,7 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 
 	log.Infoln("dm-verity root hash for the root partition: ", rootHash)
 
-	err = i.createOrUpdateVerityPartition(verityFilePath)
-	if err != nil {
+	if err = i.createOrUpdateVerityPartition(verityFilePath); err != nil {
 		return err
 	}
 
