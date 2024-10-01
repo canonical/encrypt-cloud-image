@@ -60,8 +60,8 @@ func (o *integrityOptions) GetOutput() string {
 	return o.Output
 }
 
-func sectorsFromBlocks(blockCount uint64) uint64 {
-	fsSize := blockCount * fs.BlockSize
+func sectorsFromBlocks(fsBlockCount uint64, fsBlockSize uint64) uint64 {
+	fsSize := fsBlockCount * fsBlockSize
 	// gpt.BlockSize corresponds to the sector size
 	fsSectors := fsSize / gpt.BlockSize
 	// partitions are aligned to 2048-sector boundaries
@@ -95,12 +95,12 @@ func (i *imageIntegrityProtector) prepareRootPartition() error {
 
 	log.Infoln("resizing partition", devPath)
 
-	blockCount, err := fs.GetBlockCount(devPath)
+	fsBlockCount, fsBlockSize, err := fs.GetBlockInfo(devPath)
 	if err != nil {
 		return err
 	}
 
-	endingLBA := uint64(i.rootPartition.StartingLBA) + sectorsFromBlocks(blockCount) - 1
+	endingLBA := uint64(i.rootPartition.StartingLBA) + sectorsFromBlocks(fsBlockCount, fsBlockSize) - 1
 
 	action := func() error {
 		cmd = internal_exec.LoggedCommand("sgdisk",
