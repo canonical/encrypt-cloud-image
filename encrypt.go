@@ -67,6 +67,14 @@ func (o *encryptOptions) Execute(_ []string) error {
 	return e.run(o)
 }
 
+func (o *encryptOptions) GetPositionalInput() string {
+	return o.Positional.Input
+}
+
+func (o *encryptOptions) GetOutput() string {
+	return o.Output
+}
+
 type growPartKeyData struct {
 	Key  []byte `json:"key"`
 	Slot int    `json:"slot"`
@@ -409,50 +417,8 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 	return nil
 }
 
-func (e *imageEncrypter) prepareWorkingImage() (string, error) {
-	f, err := os.Open(e.opts.Positional.Input)
-	if err != nil {
-		return "", xerrors.Errorf("cannot open source image: %w", err)
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.WithError(err).Warningln("cannot close source image")
-		}
-	}()
-
-	r, err := tryToOpenArchivedImage(f)
-	switch {
-	case err != nil:
-		return "", xerrors.Errorf("cannot open archived source image: %w", err)
-	case r != nil:
-		// Input file is an archive with a valid image
-		defer func() {
-			if err := r.Close(); err != nil {
-				log.WithError(err).Warningln("cannot close unpacked source image")
-			}
-		}()
-		if e.opts.Output == "" {
-			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
-		}
-	case e.opts.Output != "":
-		// Input file is not an archive and we are not encrypting the source image
-		r = f
-	default:
-		// Input file is not an archive and we are encrypting the source image
-		return "", nil
-	}
-
-	path := filepath.Join(e.workingDirPath(), filepath.Base(e.opts.Output))
-	log.Infoln("making copy of source image to", path)
-	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
-		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
-	}
-
-	return path, nil
-}
-
 func (e *imageEncrypter) encryptImageFromFile() error {
-	path, err := e.prepareWorkingImage()
+	path, err := e.prepareWorkingImage(e.opts)
 	switch {
 	case err != nil:
 		return xerrors.Errorf("cannot prepare working image: %w", err)

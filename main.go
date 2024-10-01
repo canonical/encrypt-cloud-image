@@ -37,6 +37,7 @@ import (
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
+	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/logutil"
 	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
@@ -72,6 +73,11 @@ func mount(dev, path, fs string) (cleanup func() error, err error) {
 		cmd := internal_exec.LoggedCommand("umount", path)
 		return cmd.Run()
 	}, nil
+}
+
+type BaseOptions interface {
+	GetPositionalInput() string
+	GetOutput() string
 }
 
 type encryptCloudImageBase struct {
@@ -354,6 +360,54 @@ func (b *encryptCloudImageBase) mountESP() (path string, err error) {
 
 	if err := b.mount(b.espDevPath(), path, "vfat"); err != nil {
 		return "", xerrors.Errorf("cannot mount ESP: %w", err)
+	}
+
+	return path, nil
+}
+
+// prepareWorkingImage is used to decide which image will be used for operations. Multiple
+// modes are supported:
+//   - if --output is not specified, modifications will happen directly on the input image.
+//     --output is mandatory if the input is an archive (i.e a zip file).
+//   - if --output is specified then the input image is copied over to the specified output file
+//     path.
+func (b *encryptCloudImageBase) prepareWorkingImage(opts BaseOptions) (string, error) {
+	f, err := os.Open(opts.GetPositionalInput())
+	if err != nil {
+		return "", xerrors.Errorf("cannot open source image: %w", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.WithError(err).Warningln("cannot close source image")
+		}
+	}()
+
+	r, err := tryToOpenArchivedImage(f)
+	switch {
+	case err != nil:
+		return "", xerrors.Errorf("cannot open archived source image: %w", err)
+	case r != nil:
+		// Input file is an archive with a valid image
+		defer func() {
+			if err := r.Close(); err != nil {
+				log.WithError(err).Warningln("cannot close unpacked source image")
+			}
+		}()
+		if opts.GetOutput() == "" {
+			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
+		}
+	case opts.GetOutput() != "":
+		// Input file is not an archive and we are not encrypting the source image
+		r = f
+	default:
+		// Input file is not an archive and we are encrypting the source image
+		return "", nil
+	}
+
+	path := filepath.Join(b.workingDirPath(), filepath.Base(opts.GetOutput()))
+	log.Infoln("making copy of source image to", path)
+	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
+		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
 	}
 
 	return path, nil

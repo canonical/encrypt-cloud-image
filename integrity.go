@@ -29,7 +29,6 @@ import (
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
-	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	log "github.com/sirupsen/logrus"
 
 	snapd_dmverity "github.com/snapcore/snapd/snap/integrity/dmverity"
@@ -51,6 +50,14 @@ type integrityOptions struct {
 func (o *integrityOptions) Execute(_ []string) error {
 	d := new(imageIntegrityProtector)
 	return d.run(o)
+}
+
+func (o *integrityOptions) GetPositionalInput() string {
+	return o.Positional.Input
+}
+
+func (o *integrityOptions) GetOutput() string {
+	return o.Output
 }
 
 func sectorsFromBlocks(blockCount uint64) uint64 {
@@ -273,50 +280,8 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 	return nil
 }
 
-func (i *imageIntegrityProtector) prepareWorkingImage() (string, error) {
-	f, err := os.Open(i.opts.Positional.Input)
-	if err != nil {
-		return "", xerrors.Errorf("cannot open source image: %w", err)
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.WithError(err).Warningln("cannot close source image")
-		}
-	}()
-
-	r, err := tryToOpenArchivedImage(f)
-	switch {
-	case err != nil:
-		return "", xerrors.Errorf("cannot open archived source image: %w", err)
-	case r != nil:
-		// Input file is an archive with a valid image
-		defer func() {
-			if err := r.Close(); err != nil {
-				log.WithError(err).Warningln("cannot close unpacked source image")
-			}
-		}()
-		if i.opts.Output == "" {
-			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
-		}
-	case i.opts.Output != "":
-		// Input file is not an archive and we are not encrypting the source image
-		r = f
-	default:
-		// Input file is not an archive and we are encrypting the source image
-		return "", nil
-	}
-
-	path := filepath.Join(i.workingDirPath(), filepath.Base(i.opts.Output))
-	log.Infoln("making copy of source image to", path)
-	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
-		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
-	}
-
-	return path, nil
-}
-
 func (i *imageIntegrityProtector) integrityProtectImageFromFile() error {
-	path, err := i.prepareWorkingImage()
+	path, err := i.prepareWorkingImage(i.opts)
 	switch {
 	case err != nil:
 		return xerrors.Errorf("cannot prepare working image: %w", err)
