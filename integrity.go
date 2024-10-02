@@ -32,7 +32,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	snapd_dmverity "github.com/snapcore/snapd/snap/integrity/dmverity"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -274,7 +273,7 @@ func (i *imageIntegrityProtector) integrityProtectImageOnDevice() error {
 
 	log.Infoln("creating manifest under", ukiRootPath)
 	if err := os.WriteFile(filepath.Join(ukiRootPath, "manifest.json"), imJson, 0644); err != nil {
-		return xerrors.Errorf("cannot create manifest file: %w", err)
+		return fmt.Errorf("cannot create manifest file: %w", err)
 	}
 
 	return nil
@@ -284,7 +283,7 @@ func (i *imageIntegrityProtector) integrityProtectImageFromFile() error {
 	path, err := i.prepareWorkingImage(i.opts)
 	switch {
 	case err != nil:
-		return xerrors.Errorf("cannot prepare working image: %w", err)
+		return fmt.Errorf("cannot prepare working image: %w", err)
 	case path != "":
 		// We aren't encrypting the source image
 		i.addCleanup(func() error {
@@ -292,7 +291,7 @@ func (i *imageIntegrityProtector) integrityProtectImageFromFile() error {
 				return nil
 			}
 			if err := os.Rename(path, i.opts.Output); err != nil {
-				return xerrors.Errorf("cannot move working image to final path: %w", err)
+				return fmt.Errorf("cannot move working image to final path: %w", err)
 			}
 			return nil
 		})
