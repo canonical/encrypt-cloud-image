@@ -296,6 +296,9 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	return nil
 }
 
+// repartition is used to wrap a partitioning related input action between a
+// disconnect and reconnect operation. After a partitioning action, partition
+// modifications need to be re-detected as well.
 func (b *encryptCloudImageBase) repartition(action func() error) error {
 	log.Infoln("disconnecting", b.imagePath, "for repartitioning")
 	if err := b.disconnectNbd(); err != nil {
