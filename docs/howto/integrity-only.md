@@ -9,10 +9,11 @@ To produce such an image from a source image the following steps are required:
 
 1. invoke `integrity-protect` to create a verity partition:
 ```bash
-sudo encrypt-cloud-image integrity-protect input.vhd
+# needs sudo for mount permissions
+sudo encrypt-cloud-image integrity-protect input.vhd -o final.vhd
 
-# This is the final image
-mv input.vhd final.vhd
+# ensure the image is owned by your user
+sudo chown `whoami` final.vhd
 ```
 
 For more information about each command and their arguments please refer to their respective
@@ -25,7 +26,7 @@ Although setting up a vTPM is not a requirement for the provisioning process of 
 an image like this is booted using a manifest to retrieve partition information and the dm-verity root hash of the
 root partition. This manifest will also be measured to a vTPM if one is available.
 
-You can run a vTPM such as swtpm like:
+You can run a vTPM such as swtpm:
 
 ```bash
 mkdir /tmp/mytpm0
@@ -36,7 +37,7 @@ swtpm socket --server type=unixio,path=/tmp/mytpm0/swtpm-sock \
              --flags not-need-init,startup-clear
 ```
 
-A primary key also needs to be initialized like:
+A primary key also needs to be initialized:
 
 ```bash
 export TPM2TOOLS_TCTI="swtpm:path=/tmp/mytpm0/swtpm-sock"

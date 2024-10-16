@@ -12,7 +12,7 @@ and several other systemd services and scripts containing the rest. `core-initrd
 cmdline with `snapd_recovery_mode=cloudimg-rootfs` for certain kernel flavors as post installation
 script.
 
-## Default CVM mode
+## Default CVM mode (gen1)
 `snap-bootstrap` is [part of the snapd repo](https://github.com/canonical/snapd/tree/master/cmd/snap-bootstrap)
 and is responsible (among others) for setting up the partitions, including communications with the TPM,
 unsealing operations etc. Currently it contains a special mode for confidential VMs which is triggered when
@@ -25,7 +25,7 @@ After provisioning the template file is deleted.
 - decrypt the rootfs and continue booting.
 
 
-## Manifest CVM mode
+## Manifest CVM mode (gen2)
 CVM mode also supports mounting of an unencrypted rootfs which is integrity protected using a manifest from the ESP.
 This manifest is generated using [](../reference/integrity-protect)) and contains the dm-verity root hash of the
 rootfs partition. `snap-bootstrap` will parse information for the manifest and perform the following:
@@ -47,7 +47,8 @@ that is owned by the image user using a TPM quote.
 
 ```{important}
 WIP: Support for this is not yet added as this requires integration with systemd's TCG log in order to log the measurement of
-the aforementioned public key.
+the aforementioned public key. For an example of how this verification can currently be done check
+[](../explanation/verify-rootfs-integrity)
 ```
 
 ## FDE key unsealing

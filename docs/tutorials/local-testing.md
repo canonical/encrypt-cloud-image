@@ -48,12 +48,12 @@ initramfs to handle the mounting and TPM measurement operations
 CPC to provide an initial image to you or build one yourself using the instructions
 in [](../explanation/building.md).
 
+## Provision the image
+
 ```{important}
 If you are building a custom image you need to modify the instructions below using
 the instructions from [](custom-cert)
 ```
-
-## Provision the image
 
 ````{tabs}
 
@@ -86,6 +86,9 @@ Finally the customized image can be booted in QEMU with something like:
 
 ```bash
 format="${FORMAT:-$(qemu-img info --output=json input.vhd | jq -r .format)}"
+
+cp /usr/share/OVMF/OVMF_VARS_4M.fd .
+
 qemu-system-x86_64 -cpu host \
                    -machine type=q35,accel=kvm \
                    -m 2048 \
@@ -101,4 +104,6 @@ qemu-system-x86_64 -cpu host \
                    -device tpm-tis,tpmdev=tpm0
 ```
 
-For more information about the booting process, see [](../reference/architecture).
+```{seealso}
+For more information about the booting process as well as ways to verify the integrity of the rootfs, see [](../reference/architecture).
+```

@@ -52,7 +52,7 @@ sha256sum signed.tar.gz > SHA256SUMS
 
 gpg -abs 0o SHA256SUMS.gpg SHA256SUMS
 
-# Upload to a local repo
+# Upload to a locally configured archive/repo
 repo_dir="/var/www/html/dists/main/signed/linux-generate-azure-amd64/${version}"
 mkdir -p $repo_dir
 cp signed.tar.gz $repo_dir
@@ -70,21 +70,3 @@ You need to point bartender to include your local repo and add an iptable rule f
 to be able to see it.
 ```
 TODO
-
-(custom-cert)=
-# Enable secure boot with a custom cert
-
-In order to allow your custom built image to be booted with secure boot using the tutorial in
-[](../tutorials/local-testing.md), several more steps are required.
-
-Before the `--extract-certs` step you should include your own certificate in the `OVMF_VARS_4M.ms.fd` file:
-```bash
-owner=$(uuidgen)
-
-virt-fw-vars -i OVMF_VARS_4M.ms.fd $owner uefi.crt -o custom_vars.ms.fd
-```
-
-Also before the `create-uefi-config` step, you need to manually create your cert's esl file:
-```bash
-cert-to-efi-sig-list -g $owner certs/db-$owner-testUEFI.pem certs/db-3.esl
-```
