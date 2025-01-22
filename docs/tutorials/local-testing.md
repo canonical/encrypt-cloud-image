@@ -104,6 +104,14 @@ qemu-system-x86_64 -cpu host \
                    -device tpm-tis,tpmdev=tpm0
 ```
 
+To connect to the running machine:
+
+```bash
+key=[path to the ssh key registered in your launchpad account]
+ssh -i $key ubuntu@127.0.0.1 -p 2222
+
+```
+
 ```{seealso}
 For more information about the booting process as well as ways to verify the integrity of the rootfs, see [](../reference/architecture).
 ```
