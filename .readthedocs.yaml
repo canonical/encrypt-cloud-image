@@ -12,7 +12,7 @@ build:
     python: "3.11"
   jobs:
     pre_install:
-      - git fetch --unshallow || true
+    - git fetch --unshallow || true
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
@@ -22,9 +22,9 @@ sphinx:
 
 # If using Sphinx, optionally build your docs in additional formats such as PDF
 formats:
-   - pdf
+- pdf
 
 # Optionally declare the Python requirements required to build your docs
 python:
-   install:
-   - requirements: docs/.sphinx/requirements.txt
+  install:
+  - requirements: docs/.sphinx/requirements.txt

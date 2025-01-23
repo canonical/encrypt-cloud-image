@@ -1,222 +1,295 @@
 import datetime
+import ast
 
 # Configuration for the Sphinx documentation builder.
 # All configuration specific to your project should be done in this file.
 #
-# For the full list of built-in configuration values, see the documentation:
+# If you're new to Sphinx and don't want any advanced or custom features,
+# just go through the items marked 'TODO'.
+#
+# A complete list of built-in Sphinx configuration values:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
-# For our custom configuration, see the Canonical Sphinx extension:
+#
+# Our starter pack uses the custom Canonical Sphinx extension
+# to keep all documentation based on it consistent and on brand:
 # https://github.com/canonical/canonical-sphinx
+
+
+#######################
+# Project information #
+#######################
+
+# Project name
 #
-# If you're not familiar with Sphinx and don't want to use advanced
-# features, it is sufficient to update the settings in the "Project
-# information" section.
+# TODO: Update with the official name of your project or product
 
-############################################################
-### Project information
-############################################################
+project = "encrypt-cloud-image"
+author = "Canonical Ltd."
 
-# Product name
-project = 'encrypt-cloud-image'
-author = 'Canonical Ltd.'
 
-# The title you want to display for the documentation in the sidebar.
-# You might want to include a version number here.
-# To not display any title, set this option to an empty string.
-html_title = project + ' documentation'
-
-# The default value uses CC-BY-SA as the license and the current year
-# as the copyright year.
+# Sidebar documentation title; best kept reasonably short
 #
-# If your documentation needs a different copyright license, use that
-# instead of 'CC-BY-SA'. Also, if your documentation is included as
-# part of the code repository of your project, it'll inherit the license
-# of the code. So you'll need to specify that license here (instead of
-# 'CC-BY-SA').
+# TODO: To include a version number, add it here (hardcoded or automated).
 #
-# For static works, it is common to provide the year of first publication.
-# Another option is to give the first year and the current year
-# for documentation that is often changed, e.g. 2022–2023 (note the en-dash).
-#
-# A way to check a GitHub repo's creation date is to obtain a classic GitHub
-# token with 'repo' permissions here: https://github.com/settings/tokens
-# Next, use 'curl' and 'jq' to extract the date from the GitHub API's output:
-#
-# curl -H 'Authorization: token <TOKEN>' \
-#   -H 'Accept: application/vnd.github.v3.raw' \
-#   https://api.github.com/repos/canonical/<REPO> | jq '.created_at'
+# TODO: To disable the title, set to an empty string.
 
-copyright = '%s CC-BY-SA, %s' % (datetime.date.today().year, author)
+html_title = project + " documentation"
 
-## Open Graph configuration - defines what is displayed as a link preview
-## when linking to the documentation from another website (see https://ogp.me/)
-# The URL where the documentation will be hosted (leave empty if you
-# don't know yet)
-ogp_site_url = 'https://canonical-starter-pack.readthedocs-hosted.com/'
-# The documentation website name (usually the same as the product name)
+
+# Copyright string; shown at the bottom of the page
+#
+# Now, the starter pack uses CC-BY-SA as the license
+# and the current year as the copyright year.
+#
+# TODO: If your docs need another license, specify it instead of 'CC-BY-SA'.
+#
+# TODO: If your documentation is a part of the code repository of your project,
+#       it inherits the code license instead; specify it instead of 'CC-BY-SA'.
+#
+# NOTE: For static works, it is common to provide the first publication year.
+#       Another option is to provide both the first year of publication
+#       and the current year, especially for docs that frequently change,
+#       e.g. 2022–2023 (note the en-dash).
+#
+#       A way to check a repo's creation date is to get a classic GitHub token
+#       with 'repo' permissions; see https://github.com/settings/tokens
+#       Next, use 'curl' and 'jq' to extract the date from the API's output:
+#
+#       curl -H 'Authorization: token <TOKEN>' \
+#         -H 'Accept: application/vnd.github.v3.raw' \
+#         https://api.github.com/repos/canonical/<REPO> | jq '.created_at'
+
+copyright = "%s CC-BY-SA, %s" % (datetime.date.today().year, author)
+
+
+# Documentation website URL
+#
+# TODO: Update with the official URL of your docs or leave empty if unsure.
+#
+# NOTE: The Open Graph Protocol (OGP) enhances page display in a social graph
+#       and is used by social media platforms; see https://ogp.me/
+
+ogp_site_url = "https://canonical-starter-pack.readthedocs-hosted.com/"
+
+
+# Preview name of the documentation website
+#
+# TODO: To use a different name for the project in previews, update as needed.
+
 ogp_site_name = project
-# The URL of an image or logo that is used in the preview
-ogp_image = 'https://assets.ubuntu.com/v1/253da317-image-document-ubuntudocs.svg'
 
-# Update with the local path to the favicon for your product
-# (default is the circle of friends)
+
+# Preview image URL
+#
+# TODO: To customise the preview image, update as needed.
+
+ogp_image = "https://assets.ubuntu.com/v1/253da317-image-document-ubuntudocs.svg"
+
+
+# Product favicon; shown in bookmarks, browser tabs, etc.
+
+# TODO: To customise the favicon, uncomment and update as needed.
+
 # html_favicon = '.sphinx/_static/favicon.png'
 
-# (Some settings must be part of the html_context dictionary, while others
-#  are on root level. Don't move the settings.)
+
+# Dictionary of values to pass into the Sphinx context for all pages:
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-html_context
+
 html_context = {
-
-    # Change to the link to the website of your product (without "https://")
-    # For example: "ubuntu.com/lxd" or "microcloud.is"
-    # If there is no product website, edit the header template to remove the
-    # link (see the readme for instructions).
-    'product_page': 'documentation.ubuntu.com',
-
-    # Add your product tag (the orange part of your logo, will be used in the
-    # header) to ".sphinx/_static" and change the path here (start with "_static")
-    # (default is the circle of friends)
+    # Product page URL; can be different from product docs URL
+    #
+    # TODO: Change to your product website URL,
+    #       dropping the 'https://' prefix, e.g. 'ubuntu.com/lxd'.
+    #
+    # TODO: If there's no such website,
+    #       remove the {{ product_page }} link from the page header template
+    #       (usually .sphinx/_templates/header.html; also, see README.rst).
+    "product_page": "documentation.ubuntu.com",
+    # Product tag image; the orange part of your logo, shown in the page header
+    #
+    # TODO: To add a tag image, uncomment and update as needed.
     # 'product_tag': '_static/tag.png',
-
-    # Change to the discourse instance you want to be able to link to
-    # using the :discourse: metadata at the top of a file
-    # (use an empty value if you don't want to link)
-    'discourse': 'https://discourse.ubuntu.com',
-
-    # Change to the Mattermost channel you want to link to
-    # (use an empty value if you don't want to link)
-    'mattermost': 'https://chat.canonical.com/canonical/channels/documentation',
-
-    # Change to the Matrix channel you want to link to
-    # (use an empty value if you don't want to link)
-    'matrix': 'https://matrix.to/#/#documentation:ubuntu.com',
-
-    # Change to the GitHub URL for your project
-    # This is used, for example, to link to the source files and allow creating GitHub issues directly from the documentation.
-    'github_url': 'https://github.com/canonical/sphinx-docs-starter-pack',
-
-    # Change to the branch for this version of the documentation
+    # Your Discourse instance URL
+    #
+    # TODO: Change to your Discourse instance URL or leave empty.
+    #
+    # NOTE: If set, adding ':discourse: 123' to an .rst file
+    #       will add a link to Discourse topic 123 at the bottom of the page.
+    "discourse": "https://discourse.ubuntu.com",
+    # Your Mattermost channel URL
+    #
+    # TODO: Change to your Mattermost channel URL or leave empty.
+    "mattermost": "https://chat.canonical.com/canonical/channels/documentation",
+    # Your Matrix channel URL
+    #
+    # TODO: Change to your Matrix channel URL or leave empty.
+    "matrix": "https://matrix.to/#/#documentation:ubuntu.com",
+    # Your documentation GitHub repository URL
+    #
+    # TODO: Change to your documentation GitHub repository URL or leave empty.
+    #
+    # NOTE: If set, links for viewing the documentation source files
+    #       and creating GitHub issues are added at the bottom of each page.
+    "github_url": "https://github.com/canonical/sphinx-docs-starter-pack",
+    # Docs branch in the repo; used in links for viewing the source files
+    #
+    # TODO: To customise the branch, uncomment and update as needed.
     # 'github_version': 'main',
-
-    # Change to the folder that contains the documentation
-    # (usually "/" or "/docs/")
-    'github_folder': '/docs/',
-
-    # Change to an empty value if your GitHub repo doesn't have issues enabled.
-    # This will disable the feedback button and the issue link in the footer.
-    # 'github_issues': 'enabled',
-
-    # Controls the existence of Previous / Next buttons at the bottom of pages
+    # Docs location in the repo; used in links for viewing the source files
+    #
+    # TODO: To customise the directory, uncomment and update as needed.
+    "github_folder": "/docs/",
+    # TODO: To enable or disable the Previous / Next buttons at the bottom of pages
     # Valid options: none, prev, next, both
-    # 'sequential_nav': "none",
-
-    # Uncomment to disable displaying the contributors for each file.
-    # (You can also limit the time frame for displaying contributors
-    # by setting a "display_contributors_since" variable.)
-    # "display_contributors": False,
-
+    # "sequential_nav": "both",
+    # TODO: To enable listing contributors on individual pages, set to True
+    "display_contributors": False,
 }
 
-# If your project is on documentation.ubuntu.com, specify the project
-# slug (for example, "lxd") here.
-# slug = ""
+# Project slug; see https://meta.discourse.org/t/what-is-category-slug/87897
+#
+# TODO: If your documentation is hosted on https://docs.ubuntu.com/,
+#       uncomment and update as needed.
 
-# These paths are needed if you want to override any default assets.
-# You can comment them out if you don't need this (but you can also just
-# leave them).
+# slug = ''
 
-html_static_path = ['.sphinx/_static']
-templates_path = ['.sphinx/_templates']
 
-############################################################
-### Redirects
-############################################################
+# Template and asset locations
 
-# Set up redirects (https://documatt.gitlab.io/sphinx-reredirects/usage.html)
+html_static_path = [".sphinx/_static"]
+templates_path = [".sphinx/_templates"]
+
+
+#############
+# Redirects #
+#############
+
+# To set up redirects: https://documatt.gitlab.io/sphinx-reredirects/usage.html
 # For example: 'explanation/old-name.html': '../how-to/prettify.html',
-# You can also configure redirects in the Read the Docs project dashboard
-# (see https://docs.readthedocs.io/en/stable/guides/redirects.html).
-# NOTE: If this variable is not defined, set to None, or the dictionary is empty,
-# the sphinx_reredirects extension will be disabled.
+
+# To set up redirects in the Read the Docs project dashboard:
+# https://docs.readthedocs.io/en/stable/guides/redirects.html
+
+# NOTE: If undefined, set to None, or empty,
+#       the sphinx_reredirects extension will be disabled.
+
 redirects = {}
 
-############################################################
-### Link checker exceptions
-############################################################
 
-# Links to ignore when checking links
+###########################
+# Link checker exceptions #
+###########################
+
+# A regex list of URLs that are ignored by 'make linkcheck'
+#
+# TODO: Remove or adjust the ACME entry after you update the contributing guide
+
 linkcheck_ignore = [
-    'http://127.0.0.1:8000'
+    "http://127.0.0.1:9000",
+    "https://github.com/canonical/ACME/*"
     ]
 
-# Pages on which to ignore anchors
-# (This list will be appended to linkcheck_anchors_ignore_for_url)
-linkcheck_anchors_ignore_for_url = [
-    r'https://github\.com/.*'
-]
 
-############################################################
-### Additions to default configuration
-############################################################
+# A regex list of URLs where anchors are ignored by 'make linkcheck'
 
-## The following settings are appended to the default configuration.
-## Use them to extend the default functionality.
+linkcheck_anchors_ignore_for_url = [r"https://github\.com/.*"]
 
-# By default, the following MyST extensions are enabled:
-# substitution, deflist, linkify
-# If you need more extensions, add them here.
+# give linkcheck multiple tries on failure
+# linkcheck_timeout = 30
+linkcheck_retries = 3
+
+########################
+# Configuration extras #
+########################
+
+# Custom MyST syntax extensions; see
+# https://myst-parser.readthedocs.io/en/latest/syntax/optional.html
+#
+# NOTE: By default, the following MyST extensions are enabled:
+#       substitution, deflist, linkify
+
 myst_enable_extensions = set(["attrs_block", "attrs_inline", "colon_fence"])
 
-# You must include the canonical_sphinx extension here.
-# This extension automatically enables the following Sphinx extensions:
-# custom-rst-roles, myst_parser, notfound.extension, related-links,
-# sphinx_copybutton, sphinx_design, sphinx_tabs.tabs,
-# sphinx_reredirects, sphinxcontrib.jquery, sphinxext.opengraph,
-# terminal-output, youtube-links
-# If you need more extensions, add them here (in addition to
-# canonical_sphinx).
+
+# Custom Sphinx extensions; see
+# https://www.sphinx-doc.org/en/master/usage/extensions/index.html
+
+# NOTE: The canonical_sphinx extension is required for the starter pack.
+#       It automatically enables the following extensions:
+#       - custom-rst-roles
+#       - myst_parser
+#       - notfound.extension
+#       - related-links
+#       - sphinx_copybutton
+#       - sphinx_design
+#       - sphinx_reredirects
+#       - sphinx_tabs.tabs
+#       - sphinxcontrib.jquery
+#       - sphinxext.opengraph
+#       - terminal-output
+#       - youtube-links
+
 extensions = [
-    'canonical_sphinx'
-    ]
+    "canonical_sphinx",
+    "sphinxcontrib.cairosvgconverter",
+    "sphinx_last_updated_by_git",
+]
 
-# Add files or directories that should be excluded from processing.
+# Excludes files or directories from processing
+
 exclude_patterns = [
-    'doc-cheat-sheet*',
-    ]
+    "doc-cheat-sheet*",
+]
 
-# Add custom CSS files (located in .sphinx/_static/)
-# html_css_files = []
+# Adds custom CSS files, located under 'html_static_path'
 
-# Add custom JavaScript files (located in .sphinx/_static/)
+html_css_files = [
+    "css/pdf.css",
+]
+
+
+# Adds custom JavaScript files, located under 'html_static_path'
+
 # html_js_files = []
 
-## The following settings override the default configuration.
 
-# Specify a reST string that is included at the end of each file.
-# The suggested value pulls the reuse/links.txt file into each reST file.
-rst_epilog = '''
+# Specifies a reST snippet to be appended to each .rst file
+
+rst_epilog = """
 .. include:: /reuse/links.txt
-'''
+"""
 
-# By default, the documentation includes a feedback button at the top.
-# You can disable it by setting the following configuration to True.
-# disable_feedback_button = False
+# Feedback button at the top; enabled by default
+#
+# TODO: To disable the button, uncomment this.
 
-# If you are using the :manpage: role, set this variable to the URL for the version
-# that you want to link to:
-# manpages_url = "https://manpages.ubuntu.com/manpages/noble/en/man{section}/{page}.{section}.html"
+# disable_feedback_button = True
 
-############################################################
-### Additional configuration
-############################################################
 
-## Add any configuration that is not covered by the common conf.py file.
+# Your manpage URL
+#
+# TODO: To enable manpage links, uncomment and update as needed.
+#
+# NOTE: If set, adding ':manpage:' to an .rst file
+#       adds a link to the corresponding man section at the bottom of the page.
 
-# Define a :center: role that can be used to center the content of table cells.
-rst_prolog = '''
+# manpages_url = f'https://manpages.ubuntu.com/manpages/{codename}/en/' + \
+#     f'man{section}/{page}.{section}.html'
+
+
+# Specifies a reST snippet to be prepended to each .rst file
+# This defines a :center: role that centers table cell content.
+# This defines a :h2: role that styles content for use with PDF generation.
+
+rst_prolog = """
 .. role:: center
    :class: align-center
-'''
+.. role:: h2
+    :class: hclass2
+"""
 
 # Workaround for https://github.com/canonical/canonical-sphinx/issues/34
-if not 'discourse_prefix' in html_context and 'discourse' in html_context:
-    html_context['discourse_prefix'] = html_context['discourse'] + '/t/'
+
+if "discourse_prefix" not in html_context and "discourse" in html_context:
+    html_context["discourse_prefix"] = html_context["discourse"] + "/t/"
