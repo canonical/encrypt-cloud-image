@@ -110,8 +110,7 @@ This will instruct the booting process to use the writable partition from the di
 an ephemeral tmpfs one. See [](../reference/architecture.md) for more information.
 
 ```{important}
-For the confidential computing model, the writable partition must be protected, for instance
-using a workflow like the one described in [integrity then encrypt](../howto/integrity-then-encrypt).
+For the confidential computing model, the writable partition must also be encrypted. This is WIP.
 ```
 
 ## Options
