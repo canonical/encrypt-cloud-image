@@ -8,7 +8,7 @@ Summary of the steps of the image building process for an Ubuntu cloud image bas
 4. Build a cloud image using CPC's tooling https://github.com/ubuntu-bartenders/ubuntu-old-fashioned/blob/master/scripts/ubuntu-bartender/ubuntu-bartender
 
 Steps marked as optional are only required if needed features are not available on the packaged
-versions avaiable in the Ubuntu archive.
+versions available in the Ubuntu archive.
 
 ## 1. Build snapd
 TODO (straight forward)
@@ -66,7 +66,7 @@ This assumes a local repo setup that you sign with a key that is in your GPG key
 
 ## 4. Building the final image using ubuntu-bartender from ubuntu-old-fashioned
 ```{note}
-You need to point bartender to include your local repo and add an iptable rule for the multipass vm
+You need to point bartender to include your local repo and add an iptables rule for the multipass vm
 to be able to see it.
 ```
 TODO

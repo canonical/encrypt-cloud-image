@@ -59,7 +59,7 @@ encrypt-cloud-image is a member of the Ubuntu family. It’s an open source proj
    :maxdepth: 2
 
    self
-   tutorials/index
-   howto/index
-   reference/index
-   explanation/index
+   /tutorials/index
+   /howto/index
+   /reference/index
+   /explanation/index

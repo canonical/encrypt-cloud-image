@@ -1,6 +1,6 @@
 # How-to
 
-There are 3 main worfklows that `encrypt-cloud-image` enables:
+There are 3 main workflows that `encrypt-cloud-image` enables:
 
 ```{toctree}
 :maxdepth: 1
