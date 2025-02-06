@@ -328,9 +328,10 @@ func (s *nbdSuite) TestConnectImage3(c *C) {
 }
 
 func (s *nbdSuite) TestConnectFail(c *C) {
-	s.mockNbdModule(c, 16)
+	nbDevices := 5
+	s.mockNbdModule(c, nbDevices)
 
-	for i := 0; i < 16; i++ {
+	for i := 0; i < nbDevices; i++ {
 		c.Check(s.mockNbdConnection(fmt.Sprintf(filepath.Join("devices/virtual/block/nbd%d"), i), 1), IsNil)
 	}
 
@@ -341,8 +342,8 @@ func (s *nbdSuite) TestConnectFail(c *C) {
 	_, err = ConnectImage("/path/to/image")
 	c.Check(err, ErrorMatches, "no device is available")
 
-	c.Check(s.udevadmCmd.Calls(), HasLen, 1600)
-	c.Check(s.qemunbdCmd.Calls(), HasLen, 1600)
+	c.Check(s.udevadmCmd.Calls(), HasLen, nbDevices*100)
+	c.Check(s.qemunbdCmd.Calls(), HasLen, nbDevices*100)
 }
 
 type testGetImageTypeHintData struct {
