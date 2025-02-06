@@ -79,6 +79,7 @@ func (s *nbdSuite) SetUpTest(c *C) {
 	c.Check(unix.Mkfifo(s.qemunbdExitFifo, 0600), IsNil)
 
 	s.qemunbdKillSwitch = filepath.Join(dir, "qemunbdkillswitch")
+	synchronizationFile := filepath.Join(dir, "udevadmdone")
 
 	qemunbdScriptTpl := `
 while [ $# -gt 0 ]; do
@@ -89,6 +90,15 @@ while [ $# -gt 0 ]; do
 			;;
 		-c)
 			if [ -e %[4]s ]; then
+				i=0
+				# Synchronize this process with udevadm mocked command,
+				# this way the qemu-nbd command doesn't return before
+				# the udevadm mocked command had time to log its call.
+				while [ ! -e %[5]s ] && [ $i -lt 100 ]; do
+					i=$((i+1))
+					sleep 0.001
+				done
+				rm -f %[5]s
 				exit 1
 			fi
 			echo "$$:$2" > %[2]s
@@ -99,15 +109,17 @@ while [ $# -gt 0 ]; do
 			;;
 	esac
 done`
-	s.qemunbdCmd = testutil.MockCommand(c, "qemu-nbd", fmt.Sprintf(qemunbdScriptTpl, os.Args[0], s.qemunbdStartedFifo, s.qemunbdExitFifo, s.qemunbdKillSwitch))
+	s.qemunbdCmd = testutil.MockCommand(c, "qemu-nbd", fmt.Sprintf(qemunbdScriptTpl, os.Args[0], s.qemunbdStartedFifo, s.qemunbdExitFifo, s.qemunbdKillSwitch, synchronizationFile))
 	s.AddCleanup(s.qemunbdCmd.Restore)
 
 	s.udevadmFifo = filepath.Join(dir, "udevadm")
 	c.Check(unix.Mkfifo(s.udevadmFifo, 0600), IsNil)
 
-	udevadmScriptTpl := `exec %[1]s -mock-udevadm-monitor %[2]s`
+	udevadmScriptTpl := `touch %[3]s
+exec %[1]s -mock-udevadm-monitor %[2]s
+`
 
-	s.udevadmCmd = testutil.MockCommand(c, "udevadm", fmt.Sprintf(udevadmScriptTpl, os.Args[0], s.udevadmFifo))
+	s.udevadmCmd = testutil.MockCommand(c, "udevadm", fmt.Sprintf(udevadmScriptTpl, os.Args[0], s.udevadmFifo, synchronizationFile))
 	s.AddCleanup(s.udevadmCmd.Restore)
 }
 
