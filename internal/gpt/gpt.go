@@ -6,13 +6,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 
 	"golang.org/x/xerrors"
 )
 
 const (
-	blockSize           = 512
+	BlockSize           = 512
 	gptSignature uint64 = 0x5452415020494645
 )
 
@@ -51,6 +51,15 @@ func (partitions Partitions) FindByPartitionType(t efi.GUID) *PartitionEntry {
 	return nil
 }
 
+func (partitions Partitions) FindByPartitionName(n string) *PartitionEntry {
+	for _, p := range partitions {
+		if p.PartitionName == n {
+			return p
+		}
+	}
+	return nil
+}
+
 func ReadPartitionTable(path string) (Partitions, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -76,12 +85,12 @@ func ReadPartitionTable(path string) (Partitions, error) {
 		return nil, errors.New("no valid PMBR detected")
 	}
 
-	hdr, err := efi.ReadPartitionTableHeader(io.NewSectionReader(f, blockSize, blockSize), false)
+	hdr, err := efi.ReadPartitionTableHeader(io.NewSectionReader(f, BlockSize, BlockSize), false)
 	if err != nil {
 		return nil, xerrors.Errorf("cannot read GPT header: %w", err)
 	}
 
-	entReader := io.NewSectionReader(f, blockSize*2, int64(hdr.NumberOfPartitionEntries*hdr.SizeOfPartitionEntry))
+	entReader := io.NewSectionReader(f, BlockSize*2, int64(hdr.NumberOfPartitionEntries*hdr.SizeOfPartitionEntry))
 	entries, err := efi.ReadPartitionEntries(entReader, hdr.NumberOfPartitionEntries, hdr.SizeOfPartitionEntry)
 	if err != nil {
 		return nil, xerrors.Errorf("cannot read partition entries: %w", err)

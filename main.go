@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
@@ -37,6 +37,7 @@ import (
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
+	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/logutil"
 	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
@@ -47,9 +48,10 @@ const (
 )
 
 var (
-	Version             = "v1.0.1"
-	espGUID             = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
-	linuxFilesystemGUID = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
+	Version                      = "v1.0.1"
+	espGUID                      = efi.MakeGUID(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, [...]uint8{0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B})
+	linuxFilesystemGUID          = efi.MakeGUID(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, [...]uint8{0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4})
+	rootVerityPartitionAmd64GUID = efi.MakeGUID(0x2C7357ED, 0xEBD2, 0x46D9, 0xAEC1, [...]uint8{0x23, 0xD4, 0x37, 0xEC, 0x2B, 0xF5})
 )
 
 type options struct {
@@ -73,15 +75,23 @@ func mount(dev, path, fs string) (cleanup func() error, err error) {
 	}, nil
 }
 
+type BaseOptions interface {
+	GetPositionalInput() string
+	GetOutput() string
+}
+
 type encryptCloudImageBase struct {
 	cleanupHandlers [][]func() error
 
 	workingDir string
 	devPath    string
+	conn       *nbd.Connection
+	imagePath  string
 
 	partitions    gpt.Partitions
 	rootPartition *gpt.PartitionEntry
 	esp           *gpt.PartitionEntry
+	verity        *gpt.PartitionEntry
 }
 
 func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
@@ -92,6 +102,15 @@ func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 	} else {
 		return "", xerrors.Errorf("Unsupported device path: %s. Please look at the code to determine what is currently supported.", b.devPath)
 	}
+}
+
+func (b *encryptCloudImageBase) getDevPath(i int) string {
+	devPathFormat, err := b.getDevPathFormat()
+	if err != nil {
+		log.Panicln(err.Error())
+	}
+
+	return fmt.Sprintf(devPathFormat, b.devPath, i)
 }
 
 func (b *encryptCloudImageBase) isNbdDevice() bool {
@@ -121,12 +140,7 @@ func (b *encryptCloudImageBase) rootDevPath() string {
 		log.Panicln("missing call to detectPartitions")
 	}
 
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
-	}
-
-	return fmt.Sprintf(devPathFormat, b.devPath, b.rootPartition.Index)
+	return b.getDevPath(b.rootPartition.Index)
 }
 
 func (b *encryptCloudImageBase) espDevPath() string {
@@ -134,12 +148,15 @@ func (b *encryptCloudImageBase) espDevPath() string {
 		log.Panicln("missing call to detectPartitions")
 	}
 
-	devPathFormat, err := b.getDevPathFormat()
-	if err != nil {
-		log.Panicln(err.Error())
+	return b.getDevPath(b.esp.Index)
+}
+
+func (b *encryptCloudImageBase) verityDevPath() string {
+	if b.verity == nil {
+		return ""
 	}
 
-	return fmt.Sprintf(devPathFormat, b.devPath, b.esp.Index)
+	return b.getDevPath(b.verity.Index)
 }
 
 func (b *encryptCloudImageBase) addCleanup(fn func() error) {
@@ -201,16 +218,45 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 	if err != nil {
 		return xerrors.Errorf("cannot connect %s to NBD device: %w", path, err)
 	}
+	b.conn = conn
+	b.imagePath = path
 	b.devPath = conn.DevPath()
 	log.Infoln("connected", path, "to", conn.DevPath())
 
-	b.addCleanup(func() error {
-		log.Debugln("disconnecting", conn.DevPath())
-		if err := conn.Disconnect(); err != nil {
-			return xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)
-		}
-		return nil
-	})
+	b.addCleanup(b.disconnectNbd)
+
+	return nil
+}
+
+func (b *encryptCloudImageBase) disconnectNbd() error {
+	log.Debugln("disconnecting", b.conn.DevPath())
+	if err := b.conn.Disconnect(); err != nil {
+		return fmt.Errorf("cannot disconnect from %s: %w", b.conn.DevPath(), err)
+	}
+	return nil
+}
+
+func (b *encryptCloudImageBase) reconnectNbd() error {
+	// This is used to to enable reconnecting to the device
+	// after a manual disconnection without having to manipulate
+	// the cleanup handlers. The cleanup handler that was set up
+	// after calling connectNbd() will automatically cleanup the
+	// new connection instead.
+	if b.conn == nil {
+		log.Fatal("no existing connection found")
+	}
+
+	log.Infoln("Reconnecting", b.imagePath)
+
+	conn, err := nbd.ConnectImage(b.imagePath)
+	if err != nil {
+		return fmt.Errorf("cannot connect %s to NBD device: %w", b.imagePath, err)
+	}
+
+	b.conn = conn
+	b.devPath = conn.DevPath()
+
+	log.Infoln("connected", b.imagePath, "to", b.conn.DevPath())
 
 	return nil
 }
@@ -239,6 +285,40 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	log.Debugln("ESP on", b.devPath, ":", esp)
 	b.esp = esp
 	log.Infoln("device node for ESP:", b.espDevPath())
+
+	// This can be return nil if a verity partition is not found in the image. This will be handled later
+	// by creating the needed partition.
+	verity := partitions.FindByPartitionName("cloudimg-rootfs-verity")
+	log.Debugln("Root verity partition on", b.devPath, ":", verity)
+	b.verity = verity
+	log.Infoln("device node for verity:", b.verityDevPath())
+
+	return nil
+}
+
+// repartition is used to wrap a partitioning related input action between a
+// disconnect and reconnect operation. After a partitioning action, partition
+// modifications need to be re-detected as well.
+func (b *encryptCloudImageBase) repartition(action func() error) error {
+	log.Infoln("disconnecting", b.imagePath, "for repartitioning")
+	if err := b.disconnectNbd(); err != nil {
+		return err
+	}
+
+	if err := action(); err != nil {
+		return err
+	}
+
+	log.Infoln("reconnecting", b.imagePath)
+	if err := b.reconnectNbd(); err != nil {
+		return err
+	}
+
+	log.Infoln("re-detecting partitions of ", b.imagePath)
+	if err := b.detectPartitions(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -283,6 +363,54 @@ func (b *encryptCloudImageBase) mountESP() (path string, err error) {
 
 	if err := b.mount(b.espDevPath(), path, "vfat"); err != nil {
 		return "", xerrors.Errorf("cannot mount ESP: %w", err)
+	}
+
+	return path, nil
+}
+
+// prepareWorkingImage is used to decide which image will be used for operations. Multiple
+// modes are supported:
+//   - if --output is not specified, modifications will happen directly on the input image.
+//     --output is mandatory if the input is an archive (i.e a zip file).
+//   - if --output is specified then the input image is copied over to the specified output file
+//     path.
+func (b *encryptCloudImageBase) prepareWorkingImage(opts BaseOptions) (string, error) {
+	f, err := os.Open(opts.GetPositionalInput())
+	if err != nil {
+		return "", xerrors.Errorf("cannot open source image: %w", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.WithError(err).Warningln("cannot close source image")
+		}
+	}()
+
+	r, err := tryToOpenArchivedImage(f)
+	switch {
+	case err != nil:
+		return "", xerrors.Errorf("cannot open archived source image: %w", err)
+	case r != nil:
+		// Input file is an archive with a valid image
+		defer func() {
+			if err := r.Close(); err != nil {
+				log.WithError(err).Warningln("cannot close unpacked source image")
+			}
+		}()
+		if opts.GetOutput() == "" {
+			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
+		}
+	case opts.GetOutput() != "":
+		// Input file is not an archive and we are not encrypting the source image
+		r = f
+	default:
+		// Input file is not an archive and we are encrypting the source image
+		return "", nil
+	}
+
+	path := filepath.Join(b.workingDirPath(), filepath.Base(opts.GetOutput()))
+	log.Infoln("making copy of source image to", path)
+	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
+		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
 	}
 
 	return path, nil

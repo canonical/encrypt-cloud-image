@@ -38,6 +38,7 @@ import (
 	"golang.org/x/xerrors"
 
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/fs"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
@@ -65,6 +66,14 @@ type encryptOptions struct {
 func (o *encryptOptions) Execute(_ []string) error {
 	e := new(imageEncrypter)
 	return e.run(o)
+}
+
+func (o *encryptOptions) GetPositionalInput() string {
+	return o.Positional.Input
+}
+
+func (o *encryptOptions) GetOutput() string {
+	return o.Output
 }
 
 type growPartKeyData struct {
@@ -409,50 +418,8 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 	return nil
 }
 
-func (e *imageEncrypter) prepareWorkingImage() (string, error) {
-	f, err := os.Open(e.opts.Positional.Input)
-	if err != nil {
-		return "", xerrors.Errorf("cannot open source image: %w", err)
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.WithError(err).Warningln("cannot close source image")
-		}
-	}()
-
-	r, err := tryToOpenArchivedImage(f)
-	switch {
-	case err != nil:
-		return "", xerrors.Errorf("cannot open archived source image: %w", err)
-	case r != nil:
-		// Input file is an archive with a valid image
-		defer func() {
-			if err := r.Close(); err != nil {
-				log.WithError(err).Warningln("cannot close unpacked source image")
-			}
-		}()
-		if e.opts.Output == "" {
-			return "", errors.New("must specify --ouptut if the supplied input source is an archive")
-		}
-	case e.opts.Output != "":
-		// Input file is not an archive and we are not encrypting the source image
-		r = f
-	default:
-		// Input file is not an archive and we are encrypting the source image
-		return "", nil
-	}
-
-	path := filepath.Join(e.workingDirPath(), filepath.Base(e.opts.Output))
-	log.Infoln("making copy of source image to", path)
-	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
-		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
-	}
-
-	return path, nil
-}
-
 func (e *imageEncrypter) encryptImageFromFile() error {
-	path, err := e.prepareWorkingImage()
+	path, err := e.prepareWorkingImage(e.opts)
 	switch {
 	case err != nil:
 		return xerrors.Errorf("cannot prepare working image: %w", err)
@@ -493,12 +460,12 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	e.enterScope()
 	defer e.exitScope()
 
-	fi, err := os.Stat(opts.Positional.Input)
+	inputIsBlockDevice, err := fs.PathIsBlockDevice(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return err
 	}
 
-	if opts.Output != "" && fi.Mode()&os.ModeDevice != 0 {
+	if opts.Output != "" && inputIsBlockDevice {
 		return errors.New("cannot specify --output with a block device")
 	}
 
@@ -506,7 +473,7 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 		return err
 	}
 
-	if fi.Mode()&os.ModeDevice != 0 {
+	if inputIsBlockDevice {
 		// Input file is a block device
 		e.devPath = opts.Positional.Input
 		if e.isNbdDevice() {
