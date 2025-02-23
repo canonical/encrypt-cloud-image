@@ -2,13 +2,12 @@ package gpt
 
 import (
 	"encoding/binary"
+	"fmt"
 	"errors"
 	"io"
 	"os"
 
 	"github.com/canonical/go-efilib"
-
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -54,7 +53,7 @@ func (partitions Partitions) FindByPartitionType(t efi.GUID) *PartitionEntry {
 func ReadPartitionTable(path string) (Partitions, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot open file: %w", err)
+		return nil, fmt.Errorf("cannot open file: %w", err)
 	}
 
 	var mbr mbr
@@ -78,13 +77,13 @@ func ReadPartitionTable(path string) (Partitions, error) {
 
 	hdr, err := efi.ReadPartitionTableHeader(io.NewSectionReader(f, blockSize, blockSize), false)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot read GPT header: %w", err)
+		return nil, fmt.Errorf("cannot read GPT header: %w", err)
 	}
 
 	entReader := io.NewSectionReader(f, blockSize*2, int64(hdr.NumberOfPartitionEntries*hdr.SizeOfPartitionEntry))
 	entries, err := efi.ReadPartitionEntries(entReader, hdr.NumberOfPartitionEntries, hdr.SizeOfPartitionEntry)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot read partition entries: %w", err)
+		return nil, fmt.Errorf("cannot read partition entries: %w", err)
 	}
 
 	var partitions Partitions

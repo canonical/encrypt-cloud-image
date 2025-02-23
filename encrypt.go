@@ -35,8 +35,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"golang.org/x/xerrors"
-
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 	internal_ioutil "github.com/canonical/encrypt-cloud-image/internal/ioutil"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
@@ -143,7 +141,7 @@ func tryToOpenImageFromZip(src io.ReaderAt, sz int64) (io.ReadCloser, error) {
 	case err == zip.ErrFormat:
 		return nil, nil
 	case err != nil:
-		return nil, xerrors.Errorf("cannot read zip: %w", err)
+		return nil, fmt.Errorf("cannot read zip: %w", err)
 	}
 	log.Debugln("iterating zip archive files")
 	for _, zf := range r.File {
@@ -156,7 +154,7 @@ func tryToOpenImageFromZip(src io.ReaderAt, sz int64) (io.ReadCloser, error) {
 		log.Debugln("...found file with valid extension")
 		rc, err := zf.Open()
 		if err != nil {
-			return nil, xerrors.Errorf("cannot open image in ZIP file: %w", err)
+			return nil, fmt.Errorf("cannot open image in ZIP file: %w", err)
 		}
 		return rc, nil
 	}
@@ -169,12 +167,12 @@ func tryToOpenArchivedImage(f *os.File) (r io.ReadCloser, err error) {
 
 	fi, err := f.Stat()
 	if err != nil {
-		return nil, xerrors.Errorf("cannot obtain file info: %w", err)
+		return nil, fmt.Errorf("cannot obtain file info: %w", err)
 	}
 
 	r, err = tryToOpenImageFromZip(f, fi.Size())
 	if err != nil {
-		return nil, xerrors.Errorf("cannot find image in zip: %w", err)
+		return nil, fmt.Errorf("cannot find image in zip: %w", err)
 	}
 
 	// TODO: Try other archive formats and compression combinations
@@ -203,10 +201,10 @@ func (e *imageEncrypter) maybeCopyKernelToESP() error {
 
 	dst := filepath.Join(path, "EFI/ubuntu/grubx64.efi")
 	if err := os.Remove(dst); err != nil {
-		return xerrors.Errorf("cannot remove grub: %w", err)
+		return fmt.Errorf("cannot remove grub: %w", err)
 	}
 	if err := internal_ioutil.CopyFile(dst, e.opts.KernelEfi); err != nil {
-		return xerrors.Errorf("cannot install kernel: %w", err)
+		return fmt.Errorf("cannot install kernel: %w", err)
 	}
 
 	return nil
@@ -217,13 +215,13 @@ func (e *imageEncrypter) growRootPartition() error {
 
 	sz, err := getBlockDeviceSize(e.rootDevPath())
 	if err != nil {
-		return xerrors.Errorf("cannot determine current partition size: %w", err)
+		return fmt.Errorf("cannot determine current partition size: %w", err)
 	}
 	log.Debugln("current size:", sz)
 
 	cmd := internal_exec.LoggedCommand("growpart", e.devPath, strconv.Itoa(e.rootPartition.Index))
 	if err := cmd.Run(); err != nil {
-		return xerrors.Errorf("cannot grow partition: %w", err)
+		return fmt.Errorf("cannot grow partition: %w", err)
 	}
 
 	// XXX: This is a bit of a hack to avoid a race whilst the kernel
@@ -231,7 +229,7 @@ func (e *imageEncrypter) growRootPartition() error {
 	time.Sleep(2 * time.Second)
 	sz, err = getBlockDeviceSize(e.rootDevPath())
 	if err != nil {
-		return xerrors.Errorf("cannot determine new partition size: %w", err)
+		return fmt.Errorf("cannot determine new partition size: %w", err)
 	}
 	log.Debugln("new size:", sz)
 
@@ -243,24 +241,24 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 
 	log.Infoln("shrinking fileystem on", devPath)
 	if err := shrinkExtFS(devPath); err != nil {
-		return nil, xerrors.Errorf("cannot shrink filesystem: %w", err)
+		return nil, fmt.Errorf("cannot shrink filesystem: %w", err)
 	}
 
 	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
 	// so with two keys we need to keep key size at 16 each.
 	var key [16]byte
 	if _, err := rand.Read(key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot obtain primary unlock key: %w", err)
+		return nil, fmt.Errorf("cannot obtain primary unlock key: %w", err)
 	}
 
 	log.Infoln("encrypting", devPath)
 	if err := luks2Encrypt(devPath, key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot encrypt %s: %w", devPath, err)
+		return nil, fmt.Errorf("cannot encrypt %s: %w", devPath, err)
 	}
 
 	log.Infoln("setting label")
 	if err := luks2SetLabel(devPath, "cloudimg-rootfs-enc"); err != nil {
-		return nil, xerrors.Errorf("cannot set label: %w", err)
+		return nil, fmt.Errorf("cannot set label: %w", err)
 	}
 
 	token := &luks2.GenericToken{
@@ -273,7 +271,7 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 
 	log.Infoln("importing cleartext token")
 	if err := luks2.ImportToken(devPath, token); err != nil {
-		return nil, xerrors.Errorf("cannot import token into LUKS2 container: %w", err)
+		return nil, fmt.Errorf("cannot import token into LUKS2 container: %w", err)
 	}
 
 	e.enterScope()
@@ -282,12 +280,12 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 	volumeName := filepath.Base(devPath)
 	log.Infoln("attaching encrypted container as", volumeName)
 	if err := luks2.Activate(volumeName, devPath, key[:]); err != nil {
-		return nil, xerrors.Errorf("cannot activate LUKS container: %w", err)
+		return nil, fmt.Errorf("cannot activate LUKS container: %w", err)
 	}
 	e.addCleanup(func() error {
 		log.Infoln("detaching", volumeName)
 		if err := luks2.Deactivate(volumeName); err != nil {
-			return xerrors.Errorf("cannot detach container: %w", err)
+			return fmt.Errorf("cannot detach container: %w", err)
 		}
 		return nil
 	})
@@ -295,7 +293,7 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 
 	log.Infoln("growing filesystem on", path)
 	if err := growExtFS(path); err != nil {
-		return nil, xerrors.Errorf("cannot grow filesystem: %w", err)
+		return nil, fmt.Errorf("cannot grow filesystem: %w", err)
 	}
 
 	return key[:], nil
@@ -314,7 +312,7 @@ func (e *imageEncrypter) customizeRootFS(growPartKey [32]byte) error {
 
 	// Disable secureboot-db.service
 	if err := os.Symlink("/dev/null", filepath.Join(path, "etc/systemd/system/secureboot-db.service")); err != nil {
-		return xerrors.Errorf("cannot disable secureboot-db.service: %w", err)
+		return fmt.Errorf("cannot disable secureboot-db.service: %w", err)
 	}
 
 	cloudCfgDir := filepath.Join(path, "etc/cloud/cloud.cfg.d")
@@ -328,7 +326,7 @@ datasource_list: [ %s ]
 		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, e.opts.OverrideDatasources)
 
 		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
-			return xerrors.Errorf("cannot create datasource override file: %w", err)
+			return fmt.Errorf("cannot create datasource override file: %w", err)
 		}
 	}
 
@@ -341,7 +339,7 @@ growpart:
 `
 
 		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
-			return xerrors.Errorf("cannot create growpart override file: %w", err)
+			return fmt.Errorf("cannot create growpart override file: %w", err)
 		}
 	} else {
 		log.Debugln("writing key data for cloud-init cc_growpart")
@@ -351,11 +349,11 @@ growpart:
 			Slot: luks2GrowPartKeyslot}
 		b, err := json.Marshal(&data)
 		if err != nil {
-			return xerrors.Errorf("cannot marshal key data for growpart: %w", err)
+			return fmt.Errorf("cannot marshal key data for growpart: %w", err)
 		}
 
 		if err := ioutil.WriteFile(filepath.Join(path, "cc_growpart_keydata"), b, 0600); err != nil {
-			return xerrors.Errorf("cannot write key data for growpart: %w", err)
+			return fmt.Errorf("cannot write key data for growpart: %w", err)
 		}
 	}
 
@@ -376,17 +374,17 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 	var growPartKey [32]byte
 	if !e.opts.GrowRoot {
 		if _, err := rand.Read(growPartKey[:]); err != nil {
-			return xerrors.Errorf("cannot obtain key for cc_growpart: %w", err)
+			return fmt.Errorf("cannot obtain key for cc_growpart: %w", err)
 		}
 	}
 
 	if err := e.customizeRootFS(growPartKey); err != nil {
-		return xerrors.Errorf("cannot apply customizations to root filesystem: %w", err)
+		return fmt.Errorf("cannot apply customizations to root filesystem: %w", err)
 	}
 
 	key, err := e.encryptRootPartition()
 	if err != nil {
-		return xerrors.Errorf("cannot encrypt root partition: %w", err)
+		return fmt.Errorf("cannot encrypt root partition: %w", err)
 	}
 
 	if !e.opts.GrowRoot {
@@ -396,14 +394,14 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 				ForceIterations: 4},
 			Slot: luks2GrowPartKeyslot}
 		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &opts); err != nil {
-			return xerrors.Errorf("cannot add key to container for cc_growpart: %w", err)
+			return fmt.Errorf("cannot add key to container for cc_growpart: %w", err)
 		}
 	} else if err := e.growRootPartition(); err != nil {
-		return xerrors.Errorf("cannot grow root partition: %w", err)
+		return fmt.Errorf("cannot grow root partition: %w", err)
 	}
 
 	if err := e.maybeCopyKernelToESP(); err != nil {
-		return xerrors.Errorf("cannot copy kernel image to ESP: %w", err)
+		return fmt.Errorf("cannot copy kernel image to ESP: %w", err)
 	}
 
 	return nil
@@ -412,7 +410,7 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 func (e *imageEncrypter) prepareWorkingImage() (string, error) {
 	f, err := os.Open(e.opts.Positional.Input)
 	if err != nil {
-		return "", xerrors.Errorf("cannot open source image: %w", err)
+		return "", fmt.Errorf("cannot open source image: %w", err)
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -423,7 +421,7 @@ func (e *imageEncrypter) prepareWorkingImage() (string, error) {
 	r, err := tryToOpenArchivedImage(f)
 	switch {
 	case err != nil:
-		return "", xerrors.Errorf("cannot open archived source image: %w", err)
+		return "", fmt.Errorf("cannot open archived source image: %w", err)
 	case r != nil:
 		// Input file is an archive with a valid image
 		defer func() {
@@ -445,7 +443,7 @@ func (e *imageEncrypter) prepareWorkingImage() (string, error) {
 	path := filepath.Join(e.workingDirPath(), filepath.Base(e.opts.Output))
 	log.Infoln("making copy of source image to", path)
 	if err := internal_ioutil.CopyFromReaderToFile(path, r); err != nil {
-		return "", xerrors.Errorf("cannot make working copy of source image: %w", err)
+		return "", fmt.Errorf("cannot make working copy of source image: %w", err)
 	}
 
 	return path, nil
@@ -455,7 +453,7 @@ func (e *imageEncrypter) encryptImageFromFile() error {
 	path, err := e.prepareWorkingImage()
 	switch {
 	case err != nil:
-		return xerrors.Errorf("cannot prepare working image: %w", err)
+		return fmt.Errorf("cannot prepare working image: %w", err)
 	case path != "":
 		// We aren't encrypting the source image
 		e.addCleanup(func() error {
@@ -463,7 +461,7 @@ func (e *imageEncrypter) encryptImageFromFile() error {
 				return nil
 			}
 			if err := os.Rename(path, e.opts.Output); err != nil {
-				return xerrors.Errorf("cannot move working image to final path: %w", err)
+				return fmt.Errorf("cannot move working image to final path: %w", err)
 			}
 			return nil
 		})
@@ -495,7 +493,7 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 
 	fi, err := os.Stat(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return fmt.Errorf("cannot obtain source file information: %w", err)
 	}
 
 	if opts.Output != "" && fi.Mode()&os.ModeDevice != 0 {

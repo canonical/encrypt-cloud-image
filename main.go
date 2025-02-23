@@ -33,8 +33,6 @@ import (
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
-	"golang.org/x/xerrors"
-
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 	"github.com/canonical/encrypt-cloud-image/internal/gpt"
 	"github.com/canonical/encrypt-cloud-image/internal/logutil"
@@ -90,7 +88,7 @@ func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
 		return "%s%d", nil
 	} else {
-		return "", xerrors.Errorf("Unsupported device path: %s. Please look at the code to determine what is currently supported.", b.devPath)
+		return "", fmt.Errorf("Unsupported device path: %s. Please look at the code to determine what is currently supported.", b.devPath)
 	}
 }
 
@@ -180,7 +178,7 @@ func (b *encryptCloudImageBase) exitScope() {
 func (b *encryptCloudImageBase) setupWorkingDir(baseDir string) error {
 	name, err := ioutil.TempDir(baseDir, "encrypt-cloud-image.")
 	if err != nil {
-		return xerrors.Errorf("cannot setup working directory: %w", err)
+		return fmt.Errorf("cannot setup working directory: %w", err)
 	}
 	b.workingDir = name
 	log.Infoln("temporary working directory:", name)
@@ -188,7 +186,7 @@ func (b *encryptCloudImageBase) setupWorkingDir(baseDir string) error {
 	b.addCleanup(func() error {
 		log.Debugln("removing", name)
 		if err := os.RemoveAll(name); err != nil {
-			return xerrors.Errorf("cannot remove working directory: %w", err)
+			return fmt.Errorf("cannot remove working directory: %w", err)
 		}
 		return nil
 	})
@@ -199,7 +197,7 @@ func (b *encryptCloudImageBase) setupWorkingDir(baseDir string) error {
 func (b *encryptCloudImageBase) connectNbd(path string) error {
 	conn, err := nbd.ConnectImage(path)
 	if err != nil {
-		return xerrors.Errorf("cannot connect %s to NBD device: %w", path, err)
+		return fmt.Errorf("cannot connect %s to NBD device: %w", path, err)
 	}
 	b.devPath = conn.DevPath()
 	log.Infoln("connected", path, "to", conn.DevPath())
@@ -207,7 +205,7 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 	b.addCleanup(func() error {
 		log.Debugln("disconnecting", conn.DevPath())
 		if err := conn.Disconnect(); err != nil {
-			return xerrors.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)
+			return fmt.Errorf("cannot disconnect from %s: %w", conn.DevPath(), err)
 		}
 		return nil
 	})
@@ -218,7 +216,7 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 func (b *encryptCloudImageBase) detectPartitions() error {
 	partitions, err := gpt.ReadPartitionTable(b.devPath)
 	if err != nil {
-		return xerrors.Errorf("cannot read partition table from %s: %w", b.devPath, err)
+		return fmt.Errorf("cannot read partition table from %s: %w", b.devPath, err)
 	}
 	b.partitions = partitions
 	log.Debugln("partition table for", b.devPath, ":", partitions)
@@ -250,7 +248,7 @@ func (b *encryptCloudImageBase) mount(devPath, mountPath, fs string) error {
 
 	b.addCleanup(func() error {
 		if err := unmount(); err != nil {
-			return xerrors.Errorf("cannot unmount %s: %w", mountPath, err)
+			return fmt.Errorf("cannot unmount %s: %w", mountPath, err)
 		}
 		return nil
 	})
@@ -261,13 +259,13 @@ func (b *encryptCloudImageBase) mount(devPath, mountPath, fs string) error {
 func (b *encryptCloudImageBase) mountRoot() (path string, err error) {
 	path = filepath.Join(b.workingDirPath(), "rootfs")
 	if err := os.MkdirAll(path, 0700); err != nil {
-		return "", xerrors.Errorf("cannot create directory to mount rootfs: %w", err)
+		return "", fmt.Errorf("cannot create directory to mount rootfs: %w", err)
 	}
 
 	log.Infoln("mounting root filesystem to", path)
 
 	if err := b.mount(b.rootDevPath(), path, "ext4"); err != nil {
-		return "", xerrors.Errorf("cannot mount rootfs: %w", err)
+		return "", fmt.Errorf("cannot mount rootfs: %w", err)
 	}
 
 	return path, nil
@@ -276,13 +274,13 @@ func (b *encryptCloudImageBase) mountRoot() (path string, err error) {
 func (b *encryptCloudImageBase) mountESP() (path string, err error) {
 	path = filepath.Join(b.workingDirPath(), "esp")
 	if err := os.MkdirAll(path, 0700); err != nil {
-		return "", xerrors.Errorf("cannot create directory to mount ESP: %w", err)
+		return "", fmt.Errorf("cannot create directory to mount ESP: %w", err)
 	}
 
 	log.Infoln("mounting ESP to", path)
 
 	if err := b.mount(b.espDevPath(), path, "vfat"); err != nil {
-		return "", xerrors.Errorf("cannot mount ESP: %w", err)
+		return "", fmt.Errorf("cannot mount ESP: %w", err)
 	}
 
 	return path, nil

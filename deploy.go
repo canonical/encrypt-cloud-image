@@ -38,8 +38,6 @@ import (
 	secboot_efi "github.com/snapcore/secboot/efi"
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
 
-	"golang.org/x/xerrors"
-
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 	"github.com/canonical/encrypt-cloud-image/internal/luks2"
 )
@@ -72,20 +70,20 @@ func readUniqueData(path string, alg tpm2.ObjectTypeId) (*tpm2.PublicIDU, error)
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot open file: %w", err)
+		return nil, fmt.Errorf("cannot open file: %w", err)
 	}
 
 	switch alg {
 	case tpm2.ObjectTypeRSA:
 		var rsa tpm2.PublicKeyRSA
 		if _, err := mu.UnmarshalFromReader(f, &rsa); err != nil {
-			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
+			return nil, fmt.Errorf("cannot unmarshal unique data: %w", err)
 		}
 		return &tpm2.PublicIDU{RSA: rsa}, nil
 	case tpm2.ObjectTypeECC:
 		var ecc *tpm2.ECCPoint
 		if _, err := mu.UnmarshalFromReader(f, &ecc); err != nil {
-			return nil, xerrors.Errorf("cannot unmarshal unique data: %w", err)
+			return nil, fmt.Errorf("cannot unmarshal unique data: %w", err)
 		}
 		return &tpm2.PublicIDU{ECC: ecc}, nil
 	}
@@ -107,7 +105,7 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 	log.Infoln("Adding recovery key to image")
 	b, err := ioutil.ReadFile(d.opts.RecoveryKeyFile)
 	if err != nil {
-		return xerrors.Errorf("cannot read recovery key from file: %w", err)
+		return fmt.Errorf("cannot read recovery key from file: %w", err)
 	}
 	if len(b) != 16 {
 		return errors.New("recovery key must be 16 bytes")
@@ -129,36 +127,36 @@ func (d *imageDeployer) maybeWriteCustomSRKTemplate(esp string, srkPub *tpm2.Pub
 
 	b, err := mu.MarshalToBytes(srkPub)
 	if err != nil {
-		return xerrors.Errorf("cannot marshal SRKpub: %w", err)
+		return fmt.Errorf("cannot marshal SRKpub: %w", err)
 	}
 
 	var srkTmpl *tpm2.Public
 	if _, err := mu.UnmarshalFromBytes(b, &srkTmpl); err != nil {
-		return xerrors.Errorf("cannot unmarshal SRK template: %w", err)
+		return fmt.Errorf("cannot unmarshal SRK template: %w", err)
 	}
 	srkTmpl.Unique = nil
 
 	if d.opts.SRKTemplateUniqueData != "" {
 		u, err := readUniqueData(d.opts.SRKTemplateUniqueData, srkTmpl.Type)
 		if err != nil {
-			return xerrors.Errorf("cannot read unique data: %w", err)
+			return fmt.Errorf("cannot read unique data: %w", err)
 		}
 		srkTmpl.Unique = u
 	}
 
 	b, err = mu.MarshalToBytes(srkTmpl)
 	if err != nil {
-		return xerrors.Errorf("cannot marshal SRK template: %w", err)
+		return fmt.Errorf("cannot marshal SRK template: %w", err)
 	}
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return xerrors.Errorf("cannot open file: %w", err)
+		return fmt.Errorf("cannot open file: %w", err)
 	}
 	defer f.Close()
 
 	if _, err := mu.MarshalToWriter(f, b); err != nil {
-		return xerrors.Errorf("cannot write SRK template to file: %w", err)
+		return fmt.Errorf("cannot write SRK template to file: %w", err)
 	}
 
 	return nil
@@ -173,12 +171,12 @@ func (d *imageDeployer) readSRKPublicArea() (*tpm2.Public, error) {
 
 	var pubBytes []byte
 	if _, err := mu.UnmarshalFromReader(f, &pubBytes); err != nil {
-		return nil, xerrors.Errorf("cannot unmarshal public area bytes: %w", err)
+		return nil, fmt.Errorf("cannot unmarshal public area bytes: %w", err)
 	}
 
 	var pub *tpm2.Public
 	if _, err := mu.UnmarshalFromBytes(pubBytes, &pub); err != nil {
-		return nil, xerrors.Errorf("cannot unmarshal public area: %w", err)
+		return nil, fmt.Errorf("cannot unmarshal public area: %w", err)
 	}
 
 	return pub, nil
@@ -191,7 +189,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	// This function assumes that the boot architecture is Azure FDE (no grub)
 	kernelPaths, err := filepath.Glob(filepath.Join(esp, "EFI/ubuntu/kernel.efi-*"))
 	if err != nil {
-		return nil, xerrors.Errorf("cannot determine kernel paths: %w", err)
+		return nil, fmt.Errorf("cannot determine kernel paths: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(esp, "EFI/ubuntu/grubx64.efi")); err == nil {
 		// Candidate images shipped a kernel at the grub path
@@ -218,7 +216,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
 			Environment:   env}
 		if err := secboot_efi.AddBootManagerProfile(pcrProfile, &params); err != nil {
-			return nil, xerrors.Errorf("cannot add EFI boot manager profile: %w", err)
+			return nil, fmt.Errorf("cannot add EFI boot manager profile: %w", err)
 		}
 	}
 
@@ -229,7 +227,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
 			Environment:   env}
 		if err := secboot_efi.AddSecureBootPolicyProfile(pcrProfile, &params); err != nil {
-			return nil, xerrors.Errorf("cannot add EFI secure boot policy profile: %w", err)
+			return nil, fmt.Errorf("cannot add EFI secure boot policy profile: %w", err)
 		}
 	}
 
@@ -249,7 +247,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	log.Debugln("PCR profile:", pcrProfile)
 	pcrValues, err := pcrProfile.ComputePCRValues(nil)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot compute PCR values: %w", err)
+		return nil, fmt.Errorf("cannot compute PCR values: %w", err)
 	}
 	log.Infoln("PCR values:")
 	for i, values := range pcrValues {
@@ -262,7 +260,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	}
 	pcrs, digests, err := pcrProfile.ComputePCRDigests(nil, tpm2.HashAlgorithmSHA256)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot compute PCR digests: %w", err)
+		return nil, fmt.Errorf("cannot compute PCR digests: %w", err)
 	}
 	log.Infoln("PCR selection:", pcrs)
 	log.Infoln("PCR digests:")
@@ -280,19 +278,19 @@ func (d *imageDeployer) newEFIEnvironment() (secboot_efi.HostEnvironment, error)
 		log.Debugln("creating EFI environment from supplied az disk profile")
 		f, err := os.Open(d.opts.AzDiskProfile)
 		if err != nil {
-			return nil, xerrors.Errorf("cannot open az disk profile resource: %w", err)
+			return nil, fmt.Errorf("cannot open az disk profile resource: %w", err)
 		}
 		defer f.Close()
 
 		var profile efienv.AzDisk
 		dec := json.NewDecoder(f)
 		if err := dec.Decode(&profile); err != nil {
-			return nil, xerrors.Errorf("cannot decode az disk profile resource: %w", err)
+			return nil, fmt.Errorf("cannot decode az disk profile resource: %w", err)
 		}
 
 		env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
 		if err != nil {
-			return nil, xerrors.Errorf("cannot create environment from az disk profile resource: %w", err)
+			return nil, fmt.Errorf("cannot create environment from az disk profile resource: %w", err)
 		}
 
 		return env, nil
@@ -300,14 +298,14 @@ func (d *imageDeployer) newEFIEnvironment() (secboot_efi.HostEnvironment, error)
 		log.Debugln("creating EFI environment from supplied UEFI config")
 		f, err := os.Open(d.opts.UefiConfig)
 		if err != nil {
-			return nil, xerrors.Errorf("cannot open UEFI config: %w", err)
+			return nil, fmt.Errorf("cannot open UEFI config: %w", err)
 		}
 		defer f.Close()
 
 		var config efienv.Config
 		dec := json.NewDecoder(f)
 		if err := dec.Decode(&config); err != nil {
-			return nil, xerrors.Errorf("cannot decode UEFI config: %w", err)
+			return nil, fmt.Errorf("cannot decode UEFI config: %w", err)
 		}
 
 		return efienv.NewEnvironment(&config, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256}), nil
@@ -384,7 +382,7 @@ func (d *imageDeployer) deployImageOnDevice() error {
 
 	key, removeToken, err := d.readKeyFromImage()
 	if err != nil {
-		return xerrors.Errorf("cannot load key from LUKS2 container: %w", err)
+		return fmt.Errorf("cannot load key from LUKS2 container: %w", err)
 	}
 
 	espPath, err := d.mountESP()
@@ -394,27 +392,27 @@ func (d *imageDeployer) deployImageOnDevice() error {
 
 	efiEnv, err := d.newEFIEnvironment()
 	if err != nil {
-		return xerrors.Errorf("cannot create EFI environment for target: %w", err)
+		return fmt.Errorf("cannot create EFI environment for target: %w", err)
 	}
 
 	pcrProfile, err := d.computePCRProtectionProfile(espPath, efiEnv)
 	if err != nil {
-		return xerrors.Errorf("cannot compute PCR protection profile: %w", err)
+		return fmt.Errorf("cannot compute PCR protection profile: %w", err)
 	}
 
 	srkPub, err := d.readSRKPublicArea()
 	if err != nil {
-		return xerrors.Errorf("cannot read SRK public area: %w", err)
+		return fmt.Errorf("cannot read SRK public area: %w", err)
 	}
 	srkName, err := srkPub.Name()
 	if err != nil {
-		return xerrors.Errorf("cannot compute name of SRK: %w", err)
+		return fmt.Errorf("cannot compute name of SRK: %w", err)
 	}
 	log.Infof("supplied SRK name: %x\n", srkName)
 
 	keyDir := filepath.Join(espPath, "device/fde")
 	if err := os.MkdirAll(keyDir, 0700); err != nil {
-		return xerrors.Errorf("cannot create directory to store sealed disk unlock key: %w", err)
+		return fmt.Errorf("cannot create directory to store sealed disk unlock key: %w", err)
 	}
 
 	log.Infoln("creating importable sealed key object")
@@ -422,19 +420,19 @@ func (d *imageDeployer) deployImageOnDevice() error {
 		PCRProfile:             pcrProfile,
 		PCRPolicyCounterHandle: tpm2.HandleNull}
 	if _, err := secboot_tpm2.SealKeyToExternalTPMStorageKey(srkPub, key, filepath.Join(keyDir, "cloudimg-rootfs.sealed-key"), &params); err != nil {
-		return xerrors.Errorf("cannot seal disk unlock key: %w", err)
+		return fmt.Errorf("cannot seal disk unlock key: %w", err)
 	}
 
 	if err := d.maybeWriteCustomSRKTemplate(espPath, srkPub); err != nil {
-		return xerrors.Errorf("cannot write custom SRK template: %w", err)
+		return fmt.Errorf("cannot write custom SRK template: %w", err)
 	}
 
 	if err := d.maybeAddRecoveryKey(key); err != nil {
-		return xerrors.Errorf("cannot add recovery key: %w", err)
+		return fmt.Errorf("cannot add recovery key: %w", err)
 	}
 
 	if err := removeToken(); err != nil {
-		return xerrors.Errorf("cannot remove cleartext token from LUKS2 container: %w", err)
+		return fmt.Errorf("cannot remove cleartext token from LUKS2 container: %w", err)
 	}
 
 	return nil
@@ -464,7 +462,7 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 
 	fi, err := os.Stat(opts.Positional.Input)
 	if err != nil {
-		return xerrors.Errorf("cannot obtain source file information: %w", err)
+		return fmt.Errorf("cannot obtain source file information: %w", err)
 	}
 
 	if fi.Mode()&os.ModeDevice != 0 {

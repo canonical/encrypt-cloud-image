@@ -27,8 +27,6 @@ import (
 	"github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
 	secboot_efi "github.com/snapcore/secboot/efi"
-
-	"golang.org/x/xerrors"
 )
 
 var (
@@ -140,12 +138,12 @@ func newConfigFromAzDiskProfile(profile *AzDisk) (*Config, error) {
 	} {
 		decoded, err := decodeAzSignatureDb(db.src)
 		if err != nil {
-			return nil, xerrors.Errorf("cannot decode %s: %w", db.name, err)
+			return nil, fmt.Errorf("cannot decode %s: %w", db.name, err)
 		}
 
 		encoded := new(bytes.Buffer)
 		if err := decoded.Write(encoded); err != nil {
-			return nil, xerrors.Errorf("cannot encode %s: %w", db.name, err)
+			return nil, fmt.Errorf("cannot encode %s: %w", db.name, err)
 		}
 
 		*db.dst = encoded.Bytes()

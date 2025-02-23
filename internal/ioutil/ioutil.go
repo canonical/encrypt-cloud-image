@@ -20,16 +20,15 @@
 package ioutil
 
 import (
+	"fmt"
 	"io"
 	"os"
-
-	"golang.org/x/xerrors"
 )
 
 func CopyFromReaderToFile(dst string, src io.Reader) error {
 	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return xerrors.Errorf("cannot open file: %w", err)
+		return fmt.Errorf("cannot open file: %w", err)
 	}
 	defer f.Close()
 
@@ -40,7 +39,7 @@ func CopyFromReaderToFile(dst string, src io.Reader) error {
 func CopyFile(dst, src string) error {
 	f, err := os.Open(src)
 	if err != nil {
-		return xerrors.Errorf("cannot open file: %w", err)
+		return fmt.Errorf("cannot open file: %w", err)
 	}
 	defer f.Close()
 
