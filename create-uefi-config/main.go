@@ -32,8 +32,6 @@ import (
 	"github.com/canonical/go-efilib"
 	"github.com/jessevdk/go-flags"
 
-	"golang.org/x/xerrors"
-
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
@@ -75,7 +73,7 @@ func populateConfigFromVars(config *efienv.Config) error {
 	} {
 		b, _, err := efi.ReadVariable(v.name, v.guid)
 		if err != nil && err != efi.ErrVarNotExist {
-			return xerrors.Errorf("cannot read %s variable: %w", v.name, err)
+			return fmt.Errorf("cannot read %s variable: %w", v.name, err)
 		}
 
 		*v.dest = b
@@ -90,7 +88,7 @@ func populateConfigFromESLs(config *efienv.Config, path string) error {
 	switch {
 	case err != nil && os.IsNotExist(err):
 	case err != nil:
-		return xerrors.Errorf("cannot populate PK: %w", err)
+		return fmt.Errorf("cannot populate PK: %w", err)
 	default:
 		config.PK = pk
 	}
@@ -134,7 +132,7 @@ func populateConfigFromESLs(config *efienv.Config, path string) error {
 				return nil
 			}()
 			if err != nil {
-				return xerrors.Errorf("cannot populate %s: %w", d.name, err)
+				return fmt.Errorf("cannot populate %s: %w", d.name, err)
 			}
 		}
 
@@ -147,18 +145,18 @@ func populateConfigFromESLs(config *efienv.Config, path string) error {
 func run(args []string) error {
 	var options Options
 	if _, err := flags.ParseArgs(&options, args); err != nil {
-		return xerrors.Errorf("cannot parse arguments: %w", err)
+		return fmt.Errorf("cannot parse arguments: %w", err)
 	}
 
 	var config efienv.Config
 
 	if options.In != "" {
 		if err := populateConfigFromESLs(&config, options.In); err != nil {
-			return xerrors.Errorf("cannot populate config from ESLs: %w", err)
+			return fmt.Errorf("cannot populate config from ESLs: %w", err)
 		}
 	} else {
 		if err := populateConfigFromVars(&config); err != nil {
-			return xerrors.Errorf("cannot populate config from EFI variables: %w", err)
+			return fmt.Errorf("cannot populate config from EFI variables: %w", err)
 		}
 	}
 
@@ -166,14 +164,14 @@ func run(args []string) error {
 
 	f, err := os.OpenFile(options.Out, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return xerrors.Errorf("cannot create file: %w", err)
+		return fmt.Errorf("cannot create file: %w", err)
 	}
 	defer f.Close()
 
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(config); err != nil {
-		return xerrors.Errorf("cannot encode config: %w", err)
+		return fmt.Errorf("cannot encode config: %w", err)
 	}
 
 	if options.SaveDatabases != "" {
@@ -199,7 +197,7 @@ func run(args []string) error {
 			},
 		} {
 			if err := ioutil.WriteFile(filepath.Join(options.SaveDatabases, d.name), d.src, 0644); err != nil {
-				return xerrors.Errorf("cannot write file %s: %w", d.name, err)
+				return fmt.Errorf("cannot write file %s: %w", d.name, err)
 			}
 		}
 	}
