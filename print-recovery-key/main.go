@@ -22,7 +22,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 
 	"github.com/snapcore/secboot"
@@ -47,7 +46,7 @@ func main() {
 		r = f
 	}
 
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
