@@ -49,9 +49,10 @@ type deployOptions struct {
 	AddEFIBootManagerProfile bool   `long:"add-efi-boot-manager-profile" description:"Protect the disk unlock key with the EFI boot manager code and boot attempts profile (PCR4)"`
 	AddEFISecureBootProfile  bool   `long:"add-efi-secure-boot-profile" description:"Protect the disk unlock key with the EFI secure boot policy profile (PCR7)"`
 	AddUbuntuKernelProfile   bool   `long:"add-ubuntu-kernel-profile" description:"Protect the disk unlock key with properties measured by the Ubuntu kernel (PCR12). Also prevents access outside of early boot"`
-
-	AzDiskProfile string `long:"az-disk-profile" description:""`
-	UefiConfig    string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
+	RootPartitionUUID        string `long:"root-partition-uuid" description:"Explicitly provide the root partition UUID instead of relying on partition type"`
+	ESPPartitionUUID         string `long:"efi-partition-uuid" description:"Explicitly provide the ESP partition UUID instead of relying on partition type"`
+	AzDiskProfile            string `long:"az-disk-profile" description:""`
+	UefiConfig               string `long:"uefi-config" description:"JSON file describring the platform firmware configuration"`
 
 	SRKTemplateUniqueData string `long:"srk-template-unique-data" description:"Path to the TPMU_PUBLIC_ID structure used to create the SRK"`
 	SRKPub                string `long:"srk-pub" description:"Path to SRK public area" required:"true"`
@@ -203,13 +204,13 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		log.Debugln("found kernel", path)
 		kernels = append(kernels, &secboot_efi.ImageLoadEvent{
 			Source: secboot_efi.Shim,
-			Image: secboot_efi.FileImage(path)})
+			Image:  secboot_efi.FileImage(path)})
 	}
 
 	loadSequences := &secboot_efi.ImageLoadEvent{
 		Source: secboot_efi.Firmware,
-		Image: secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
-		Next: kernels}
+		Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
+		Next:   kernels}
 
 	if d.opts.AddEFIBootManagerProfile {
 		log.Debugln("adding boot manager PCR profile")
@@ -378,7 +379,7 @@ func (d *imageDeployer) deployImageOnDevice() error {
 		return err
 	}
 
-	if err := d.detectPartitions(); err != nil {
+	if err := d.detectPartitions(d.opts.RootPartitionUUID, d.opts.ESPPartitionUUID); err != nil {
 		return err
 	}
 
@@ -465,6 +466,17 @@ func (d *imageDeployer) run(opts *deployOptions) error {
 	fi, err := os.Stat(opts.Positional.Input)
 	if err != nil {
 		return xerrors.Errorf("cannot obtain source file information: %w", err)
+	}
+
+	rootPartitionUUIDOverride := opts.RootPartitionUUID != ""
+	espPartitionUUIDOverride := opts.ESPPartitionUUID != ""
+
+	if rootPartitionUUIDOverride != espPartitionUUIDOverride {
+		return errors.New("--root-partition-uuid and --esp-partition-uuid should be provided together or none should be provided")
+	}
+
+	if rootPartitionUUIDOverride && fi.Mode()&os.ModeDevice == 0 {
+		return errors.New("overrides for partition detection are supported only when specifying block device")
 	}
 
 	if fi.Mode()&os.ModeDevice != 0 {

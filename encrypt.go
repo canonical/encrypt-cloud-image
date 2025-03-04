@@ -57,6 +57,9 @@ type encryptOptions struct {
 	OverrideDatasources string `long:"override-datasources" description:"Override the cloud-init datasources with the supplied comma-delimited list of sources"`
 	GrowRoot            bool   `long:"grow-root" description:"Grow the root partition to fill the available space, disabling cloud-init's cc_growpart"`
 
+	RootPartitionUUID string `long:"root-partition-uuid" description:"Explicitly provide the root partition UUID instead of relying on partition type"`
+	ESPPartitionUUID  string `long:"efi-partition-uuid" description:"Explicitly provide the ESP partition UUID instead of relying on partition type"`
+
 	Positional struct {
 		Input string `positional-arg-name:"Source image path (file or block device)"`
 	} `positional-args:"true" required:"true"`
@@ -369,7 +372,7 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 
 	log.Infoln("encrypting image on", e.devPath)
 
-	if err := e.detectPartitions(); err != nil {
+	if err := e.detectPartitions(e.opts.RootPartitionUUID, e.opts.ESPPartitionUUID); err != nil {
 		return err
 	}
 
@@ -504,6 +507,16 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 
 	if err := e.setupWorkingDir(); err != nil {
 		return err
+	}
+	rootPartitionUUIDOverride := opts.RootPartitionUUID != ""
+	espPartitionUUIDOverride := opts.ESPPartitionUUID != ""
+
+	if rootPartitionUUIDOverride != espPartitionUUIDOverride {
+		return errors.New("--root-partition-uuid and --esp-partition-uuid should be provided together or none should be provided")
+	}
+
+	if rootPartitionUUIDOverride && fi.Mode()&os.ModeDevice == 0 {
+		return errors.New("overrides for partition detection are supported only when specifying block device")
 	}
 
 	if fi.Mode()&os.ModeDevice != 0 {

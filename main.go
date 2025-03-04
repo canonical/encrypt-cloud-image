@@ -215,7 +215,7 @@ func (b *encryptCloudImageBase) connectNbd(path string) error {
 	return nil
 }
 
-func (b *encryptCloudImageBase) detectPartitions() error {
+func (b *encryptCloudImageBase) detectPartitions(rootPartitionUUID string, espPartitionUUID string) error {
 	partitions, err := gpt.ReadPartitionTable(b.devPath)
 	if err != nil {
 		return xerrors.Errorf("cannot read partition table from %s: %w", b.devPath, err)
@@ -223,19 +223,37 @@ func (b *encryptCloudImageBase) detectPartitions() error {
 	b.partitions = partitions
 	log.Debugln("partition table for", b.devPath, ":", partitions)
 
-	// XXX: Could there be more than one partition with this type?
-	root := partitions.FindByPartitionType(linuxFilesystemGUID)
-	if root == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, b.devPath)
+	var root *gpt.PartitionEntry
+	if rootPartitionUUID != "" {
+		root = partitions.FindByUUID(rootPartitionUUID)
+		if root == nil {
+			return fmt.Errorf("cannot find partition by partition uuid %v on %s", rootPartitionUUID, b.devPath)
+		}
+	} else {
+		// TODO: add some logic to detect if more than one partition with this type are present and
+		// ask the user to explicitly specify the partition UUIDs if it's the case.
+		root = partitions.FindByPartitionType(linuxFilesystemGUID)
+		if root == nil {
+			return fmt.Errorf("cannot find partition with the type %v on %s", linuxFilesystemGUID, b.devPath)
+		}
 	}
+
 	log.Debugln("rootfs partition on", b.devPath, ":", root)
 	b.rootPartition = root
 	log.Infoln("device node for rootfs partition:", b.rootDevPath())
-
-	esp := partitions.FindByPartitionType(espGUID)
-	if esp == nil {
-		return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, b.devPath)
+	var esp *gpt.PartitionEntry
+	if espPartitionUUID != "" {
+		esp = partitions.FindByUUID(espPartitionUUID)
+		if esp == nil {
+			return fmt.Errorf("cannot find partition with partition uuid %v on %s", espPartitionUUID, b.devPath)
+		}
+	} else {
+		esp = partitions.FindByPartitionType(espGUID)
+		if esp == nil {
+			return fmt.Errorf("cannot find partition with the type %v on %s", espGUID, b.devPath)
+		}
 	}
+
 	log.Debugln("ESP on", b.devPath, ":", esp)
 	b.esp = esp
 	log.Infoln("device node for ESP:", b.espDevPath())
