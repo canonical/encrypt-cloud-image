@@ -21,9 +21,9 @@ jobs:
           go-version: '>=1.13'
 
       - name: Build
-        run: go build -v -o . .
+        run: go build -v -o build ./...
 
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: encrypt-cloud-image
+          files: build/*
