@@ -36,8 +36,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"golang.org/x/xerrors"
-
 	internal_exec "github.com/canonical/encrypt-cloud-image/internal/exec"
 )
 
@@ -247,7 +245,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 	}
 
 	if err := udevadmCmd.Start(); err != nil {
-		return xerrors.Errorf("cannot start udevadm monitor: %w", err)
+		return fmt.Errorf("cannot start udevadm monitor: %w", err)
 	}
 
 	c.logger.Debugln("started udevadm monitor")
@@ -314,7 +312,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 			p, _ := os.FindProcess(pid)
 			if err := p.Kill(); err != nil {
 				var e syscall.Errno
-				if xerrors.As(err, &e) {
+				if errors.As(err, &e) {
 					log.WithError(err).Panicln("cannot kill qemu-nbd")
 				}
 			}
@@ -326,16 +324,16 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 		case err := <-c.qemuNbdDone:
 			c.logger.Debugln("qemu-nbd exitted with an error:", err)
 			var e *exec.ExitError
-			if xerrors.As(err, &e) && e.ExitCode() == 1 {
+			if errors.As(err, &e) && e.ExitCode() == 1 {
 				return errDeviceBusy
 			}
-			return xerrors.Errorf("qemu-nbd failed: %w", err)
+			return fmt.Errorf("qemu-nbd failed: %w", err)
 		case pid = <-qemuNbdStarted:
 			c.logger.Debugln("qemu-nbd started with PID:", pid)
 			managed, err := dev.isManagedByProcess(pid)
 			switch {
 			case err != nil:
-				return xerrors.Errorf("cannot determine if %s is managed by us: %w", dev, err)
+				return fmt.Errorf("cannot determine if %s is managed by us: %w", dev, err)
 			case managed:
 				c.logger.Debugln("our qemu-nbd manages the NBD device")
 				return nil
@@ -348,7 +346,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 				managed, err := dev.isManagedByProcess(pid)
 				switch {
 				case err != nil:
-					return xerrors.Errorf("cannot determine if %s is managed by us: %w", dev, err)
+					return fmt.Errorf("cannot determine if %s is managed by us: %w", dev, err)
 				case managed:
 					c.logger.Debugln("our qemu-nbd manages the NBD device")
 					return nil
@@ -359,7 +357,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 				c.logger.Debugln("we haven't got the PID for qemu-nbd yet")
 			}
 		case err := <-monitorDone:
-			return xerrors.Errorf("udevadm monitor scanner goroutine returned unexpectedly: %w", err)
+			return fmt.Errorf("udevadm monitor scanner goroutine returned unexpectedly: %w", err)
 		}
 	}
 }
@@ -367,7 +365,7 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 func (c *Connection) connect() error {
 	maxDevices, err := getMaxNBDs()
 	if err != nil {
-		return xerrors.Errorf("cannot determine maximum number of NBD devices: %w", err)
+		return fmt.Errorf("cannot determine maximum number of NBD devices: %w", err)
 	}
 	c.logger.Debugln("maximum number of NBD devices:", maxDevices)
 
@@ -379,7 +377,7 @@ func (c *Connection) connect() error {
 			case err == errDeviceBusy:
 				c.logger.Debugln("device", j, "is already managed by another process")
 			case err != nil:
-				return xerrors.Errorf("unexpected error when trying %s: %w", j, err)
+				return fmt.Errorf("unexpected error when trying %s: %w", j, err)
 			default:
 				c.logger.Debugln("connected to device", j)
 				c.dev = nbdDev(j)
@@ -430,7 +428,7 @@ func ConnectImage(path string) (conn *Connection, err error) {
 			if entry, ok := v.(*log.Entry); ok {
 				if e, ok := entry.Data[log.ErrorKey]; ok {
 					var s syscall.Errno
-					if xerrors.As(e.(error), &s) {
+					if errors.As(e.(error), &s) {
 						err = e.(error)
 						return
 					}
