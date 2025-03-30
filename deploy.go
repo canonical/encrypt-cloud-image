@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -106,7 +105,7 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 	}
 
 	log.Infoln("Adding recovery key to image")
-	b, err := ioutil.ReadFile(d.opts.RecoveryKeyFile)
+	b, err := os.ReadFile(d.opts.RecoveryKeyFile)
 	if err != nil {
 		return xerrors.Errorf("cannot read recovery key from file: %w", err)
 	}

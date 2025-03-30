@@ -22,7 +22,6 @@ package efienv_test
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -234,7 +233,7 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 		c.Check(err, IsNil)
 		c.Check(attrs, Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 
-		expected, err := ioutil.ReadFile(filepath.Join("testdata", v.name))
+		expected, err := os.ReadFile(filepath.Join("testdata", v.name))
 		c.Check(err, IsNil)
 		c.Check(data, DeepEquals, expected)
 	}

@@ -21,7 +21,6 @@ package efienv_test
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -75,7 +74,7 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 		c.Check(err, IsNil)
 		c.Check(attrs, Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 
-		expected, err := ioutil.ReadFile(filepath.Join("testdata", v.name))
+		expected, err := os.ReadFile(filepath.Join("testdata", v.name))
 		c.Check(err, IsNil)
 		c.Check(data, DeepEquals, expected)
 	}
