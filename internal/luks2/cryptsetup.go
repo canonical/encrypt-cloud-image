@@ -30,8 +30,6 @@ import (
 	"time"
 
 	"github.com/snapcore/snapd/osutil"
-
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -56,7 +54,7 @@ func cryptsetupCmd(stdin io.Reader, callback func(cmd *exec.Cmd) error, args ...
 	cmd.Stderr = &b
 
 	if err := cmd.Start(); err != nil {
-		return xerrors.Errorf("cannot start cryptsetup: %w", err)
+		return fmt.Errorf("cannot start cryptsetup: %w", err)
 	}
 
 	var cbErr error
@@ -216,7 +214,7 @@ func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) 
 
 	fifoPath, cleanupFifo, err := mkFifo()
 	if err != nil {
-		return xerrors.Errorf("cannot create FIFO for passing existing key to cryptsetup: %w", err)
+		return fmt.Errorf("cannot create FIFO for passing existing key to cryptsetup: %w", err)
 	}
 	defer cleanupFifo()
 
@@ -250,7 +248,7 @@ func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) 
 			// If we fail to open the write end, the read end will be blocked in open(), so
 			// kill the process.
 			cmd.Process.Kill()
-			return xerrors.Errorf("cannot open FIFO for passing existing key to cryptsetup: %w", err)
+			return fmt.Errorf("cannot open FIFO for passing existing key to cryptsetup: %w", err)
 		}
 
 		if _, err := f.Write(existingKey); err != nil {
@@ -261,14 +259,14 @@ func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) 
 				// so kill the process.
 				cmd.Process.Kill()
 			}
-			return xerrors.Errorf("cannot pass existing key to cryptsetup: %w", err)
+			return fmt.Errorf("cannot pass existing key to cryptsetup: %w", err)
 		}
 
 		if err := f.Close(); err != nil {
 			// If we can't close the write end, the read end will remain blocked inside read(),
 			// so kill the process.
 			cmd.Process.Kill()
-			return xerrors.Errorf("cannot close write end of FIFO: %w", err)
+			return fmt.Errorf("cannot close write end of FIFO: %w", err)
 		}
 
 		return nil
@@ -281,7 +279,7 @@ func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) 
 func ImportToken(devicePath string, token Token) error {
 	tokenJSON, err := json.Marshal(token)
 	if err != nil {
-		return xerrors.Errorf("cannot serialize token: %w", err)
+		return fmt.Errorf("cannot serialize token: %w", err)
 	}
 
 	return cryptsetupCmd(bytes.NewReader(tokenJSON), nil, "token", "import", devicePath)

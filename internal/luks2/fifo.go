@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 
 	"golang.org/x/sys/unix"
-	"golang.org/x/xerrors"
 )
 
 func mkFifo() (string, func(), error) {
@@ -35,7 +34,7 @@ func mkFifo() (string, func(), error) {
 	// process reaches here at the same time.
 	dir, err := ioutil.TempDir("/run", filepath.Base(os.Args[0])+".")
 	if err != nil {
-		return "", nil, xerrors.Errorf("cannot create temporary directory: %w", err)
+		return "", nil, fmt.Errorf("cannot create temporary directory: %w", err)
 	}
 
 	cleanup := func() {
@@ -54,7 +53,7 @@ func mkFifo() (string, func(), error) {
 
 	fifo := filepath.Join(dir, "fifo")
 	if err := unix.Mkfifo(fifo, 0600); err != nil {
-		return "", nil, xerrors.Errorf("cannot create FIFO: %w", err)
+		return "", nil, fmt.Errorf("cannot create FIFO: %w", err)
 	}
 
 	succeeded = true
