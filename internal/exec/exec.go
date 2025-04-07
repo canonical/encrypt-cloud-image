@@ -30,8 +30,6 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-
-	"golang.org/x/xerrors"
 )
 
 type teeReadCloser struct {
@@ -142,7 +140,7 @@ func (c *LoggedCmd) Start() error {
 		}
 
 		err := scanner.Err()
-		if xerrors.Is(err, os.ErrClosed) {
+		if errors.Is(err, os.ErrClosed) {
 			err = nil
 		}
 
@@ -159,7 +157,7 @@ func (c *LoggedCmd) Start() error {
 	if c.Cmd.Stdout == nil {
 		stdout, err := c.Cmd.StdoutPipe()
 		if err != nil {
-			return xerrors.Errorf("cannot obtain stdout pipe: %w", err)
+			return fmt.Errorf("cannot obtain stdout pipe: %w", err)
 		}
 		c.closeAfterStartError = append(c.closeAfterStartError, stdout)
 
@@ -175,7 +173,7 @@ func (c *LoggedCmd) Start() error {
 		stderr, err := c.Cmd.StderrPipe()
 		if err != nil {
 			c.closeHandles(c.closeAfterStartError)
-			return xerrors.Errorf("cannot obtain stderr pipe: %w", err)
+			return fmt.Errorf("cannot obtain stderr pipe: %w", err)
 		}
 
 		if c.Stderr != nil {

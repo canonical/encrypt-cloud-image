@@ -30,8 +30,6 @@ import (
 	"github.com/canonical/go-efilib"
 	log "github.com/sirupsen/logrus"
 
-	"golang.org/x/xerrors"
-
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
@@ -76,14 +74,14 @@ func run(args []string) error {
 
 	f, err := os.Open(input)
 	if err != nil {
-		return xerrors.Errorf("cannot open file: %w", err)
+		return fmt.Errorf("cannot open file: %w", err)
 	}
 	defer f.Close()
 
 	var config efienv.Config
 	dec := json.NewDecoder(f)
 	if err := dec.Decode(&config); err != nil {
-		return xerrors.Errorf("cannot decode config: %w", err)
+		return fmt.Errorf("cannot decode config: %w", err)
 	}
 
 	profile := efienv.AzDisk{
@@ -98,11 +96,11 @@ func run(args []string) error {
 	switch {
 	case err != nil && err == io.EOF:
 	case err != nil:
-		return xerrors.Errorf("cannot read PK: %w", err)
+		return fmt.Errorf("cannot read PK: %w", err)
 	default:
 		azdb, err := encodeAzSignatureDb(efi.SignatureDatabase{l})
 		if err != nil {
-			return xerrors.Errorf("cannot encode PK to az format: %w", err)
+			return fmt.Errorf("cannot encode PK to az format: %w", err)
 		}
 		profile.Properties.UefiSettings.Signatures.PK = azdb[0]
 	}
@@ -131,12 +129,12 @@ func run(args []string) error {
 		r := bytes.NewReader(d.src)
 		db, err := efi.ReadSignatureDatabase(r)
 		if err != nil {
-			return xerrors.Errorf("cannot read %s: %w", d.name, err)
+			return fmt.Errorf("cannot read %s: %w", d.name, err)
 		}
 
 		azdb, err := encodeAzSignatureDb(db)
 		if err != nil {
-			return xerrors.Errorf("cannot encode %s to az format: %w", d.name, err)
+			return fmt.Errorf("cannot encode %s to az format: %w", d.name, err)
 		}
 
 		*d.dst = azdb
@@ -144,7 +142,7 @@ func run(args []string) error {
 
 	f, err = os.OpenFile(output, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return xerrors.Errorf("cannot create az template file: %w", err)
+		return fmt.Errorf("cannot create az template file: %w", err)
 	}
 	defer f.Close()
 
