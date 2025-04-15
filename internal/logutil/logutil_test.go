@@ -26,38 +26,38 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	. "gopkg.in/check.v1"
+	check "gopkg.in/check.v1"
 
-	. "github.com/canonical/encrypt-cloud-image/internal/logutil"
+	"github.com/canonical/encrypt-cloud-image/internal/logutil"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func Test(t *testing.T) { check.TestingT(t) }
 
 type logutilSuite struct{}
 
-var _ = Suite(&logutilSuite{})
+var _ = check.Suite(&logutilSuite{})
 
-func (s *logutilSuite) testFormattedWriterLevels(c *C, levels []log.Level) {
-	w := NewFormattedWriter(levels)
-	c.Check(w.Levels(), DeepEquals, levels)
+func (s *logutilSuite) testFormattedWriterLevels(c *check.C, levels []log.Level) {
+	w := logutil.NewFormattedWriter(levels)
+	c.Check(w.Levels(), check.DeepEquals, levels)
 }
 
-func (s *logutilSuite) TestFormattedWriterLevels1(c *C) {
+func (s *logutilSuite) TestFormattedWriterLevels1(c *check.C) {
 	s.testFormattedWriterLevels(c, []log.Level{log.PanicLevel, log.FatalLevel, log.ErrorLevel, log.WarnLevel})
 }
 
-func (s *logutilSuite) TestFormattedWriterLevels2(c *C) {
+func (s *logutilSuite) TestFormattedWriterLevels2(c *check.C) {
 	s.testFormattedWriterLevels(c, []log.Level{log.InfoLevel, log.DebugLevel, log.TraceLevel})
 }
 
-func (s *logutilSuite) TestFormattedWriterDefaultOutput(c *C) {
-	w := NewFormattedWriter(nil)
-	c.Check(w.Output(), Equals, os.Stderr)
+func (s *logutilSuite) TestFormattedWriterDefaultOutput(c *check.C) {
+	w := logutil.NewFormattedWriter(nil)
+	c.Check(w.Output(), check.Equals, os.Stderr)
 }
 
-func (s *logutilSuite) TestFormattedWriterDefaultFormatter(c *C) {
-	w := NewFormattedWriter(nil)
-	c.Check(w.Formatter(), FitsTypeOf, &log.TextFormatter{})
+func (s *logutilSuite) TestFormattedWriterDefaultFormatter(c *check.C) {
+	w := logutil.NewFormattedWriter(nil)
+	c.Check(w.Formatter(), check.FitsTypeOf, &log.TextFormatter{})
 }
 
 type mockFormatter struct {
@@ -69,17 +69,17 @@ func (f *mockFormatter) Format(entry *log.Entry) ([]byte, error) {
 	return []byte("hello world\n"), nil
 }
 
-func (s *logutilSuite) TestFormatterWriterFire(c *C) {
+func (s *logutilSuite) TestFormatterWriterFire(c *check.C) {
 	buf := new(bytes.Buffer)
 	formatter := new(mockFormatter)
 
-	w := NewFormattedWriter(nil)
+	w := logutil.NewFormattedWriter(nil)
 	w.SetFormatter(formatter)
 	w.SetOutput(buf)
 
 	entry := &log.Entry{Logger: log.StandardLogger()}
-	c.Check(w.Fire(entry), IsNil)
-	c.Check(entry.Logger, Equals, log.StandardLogger())
-	c.Check(buf.String(), Equals, "hello world\n")
-	c.Check(formatter.lastEntry, Equals, entry)
+	c.Check(w.Fire(entry), check.IsNil)
+	c.Check(entry.Logger, check.Equals, log.StandardLogger())
+	c.Check(buf.String(), check.Equals, "hello world\n")
+	c.Check(formatter.lastEntry, check.Equals, entry)
 }

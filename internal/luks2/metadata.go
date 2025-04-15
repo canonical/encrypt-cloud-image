@@ -22,9 +22,6 @@ package luks2
 import (
 	"bytes"
 	"crypto"
-	_ "crypto/sha1"
-	_ "crypto/sha256"
-	_ "crypto/sha512"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -36,6 +33,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	// TODO: figure out why this is needed
+	_ "crypto/sha1"
+	_ "crypto/sha256"
+	_ "crypto/sha512"
 
 	"golang.org/x/sys/unix"
 )
@@ -133,7 +135,10 @@ func acquireSharedLock(path string, mode LockMode) (release func(), err error) {
 		}
 
 		// Release the lock
-		unix.Flock(int(lockFile.Fd()), unix.LOCK_UN)
+		err := unix.Flock(int(lockFile.Fd()), unix.LOCK_UN)
+		if err != nil {
+			fmt.Fprintf(stderr, "cannot release lock on %s: %v\n", lockFile.Name(), err)
+		}
 		defer func() {
 			lockFile.Close()
 			lockFile = nil
@@ -332,11 +337,11 @@ type binaryHdr struct {
 	Magic       [6]byte
 	Version     uint16
 	HdrSize     uint64
-	SeqId       uint64
+	SeqID       uint64
 	Label       label
 	CsumAlg     csumAlg
 	Salt        [64]byte
-	Uuid        [40]byte
+	UUID        [40]byte
 	Subsystem   [48]byte
 	HdrOffset   uint64
 	Padding     [184]byte
@@ -344,16 +349,16 @@ type binaryHdr struct {
 	Padding4096 [7 * 512]byte
 }
 
-// JsonNumber represents a JSON number literal. It is similar to
+// JSONNumber represents a JSON number literal. It is similar to
 // json.Number but supports uint64 and int literals as required by
 // the LUKS2 specification.
-type JsonNumber string
+type JSONNumber string
 
-func (n JsonNumber) Int() (int, error) {
+func (n JSONNumber) Int() (int, error) {
 	return strconv.Atoi(string(n))
 }
 
-func (n JsonNumber) Uint64() (uint64, error) {
+func (n JSONNumber) Uint64() (uint64, error) {
 	return strconv.ParseUint(string(n), 10, 64)
 }
 
@@ -367,8 +372,8 @@ type Config struct {
 
 func (c *Config) UnmarshalJSON(data []byte) error {
 	var d struct {
-		JSONSize     JsonNumber `json:"json_size"`
-		KeyslotsSize JsonNumber `json:"keyslots_size"`
+		JSONSize     JSONNumber `json:"json_size"`
+		KeyslotsSize JSONNumber `json:"keyslots_size"`
 		Flags        []string
 		Requirements []string
 	}
@@ -451,9 +456,9 @@ func (t *GenericToken) MarshalJSON() ([]byte, error) {
 
 	m["type"] = t.TokenType
 
-	var keyslots []JsonNumber
+	var keyslots []JSONNumber
 	for _, s := range t.TokenKeyslots {
-		keyslots = append(keyslots, JsonNumber(strconv.Itoa(s)))
+		keyslots = append(keyslots, JSONNumber(strconv.Itoa(s)))
 	}
 	m["keyslots"] = keyslots
 
@@ -463,7 +468,7 @@ func (t *GenericToken) MarshalJSON() ([]byte, error) {
 func (t *GenericToken) UnmarshalJSON(data []byte) error {
 	var d struct {
 		Type     TokenType
-		Keyslots []JsonNumber
+		Keyslots []JSONNumber
 	}
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
@@ -503,8 +508,8 @@ type Digest struct {
 func (d *Digest) UnmarshalJSON(data []byte) error {
 	var t struct {
 		Type       KDFType
-		Keyslots   []JsonNumber
-		Segments   []JsonNumber
+		Keyslots   []JSONNumber
+		Segments   []JSONNumber
 		Salt       []byte
 		Digest     []byte
 		Hash       Hash
@@ -543,7 +548,7 @@ func (d *Digest) UnmarshalJSON(data []byte) error {
 // Integrity corresponds to an integrity object in the JSON metadata of a LUKS2 volume,
 // and details the data integrity parameters for a segment.
 type Integrity struct {
-	Type              string // Integirty type in dm-crypt notation
+	Type              string // Integrity type in dm-crypt notation
 	JournalEncryption string
 	JournalIntegrity  string
 }
@@ -565,9 +570,9 @@ type Segment struct {
 func (s *Segment) UnmarshalJSON(data []byte) error {
 	var d struct {
 		Type       string
-		Offset     JsonNumber
-		Size       JsonNumber
-		IVTweak    JsonNumber `json:"iv_tweak"`
+		Offset     JSONNumber
+		Size       JSONNumber
+		IVTweak    JSONNumber `json:"iv_tweak"`
 		Encryption string
 		SectorSize int `json:"sector_size"`
 		Integrity  *Integrity
@@ -624,8 +629,8 @@ type Area struct {
 func (a *Area) UnmarshalJSON(data []byte) error {
 	var d struct {
 		Type       AreaType
-		Offset     JsonNumber
-		Size       JsonNumber
+		Offset     JSONNumber
+		Size       JSONNumber
 		Encryption string
 		KeySize    int `json:"key_size"`
 	}
@@ -722,10 +727,10 @@ type Metadata struct {
 
 func (m *Metadata) UnmarshalJSON(data []byte) error {
 	var d struct {
-		Keyslots map[JsonNumber]*Keyslot
-		Segments map[JsonNumber]*Segment
-		Digests  map[JsonNumber]*Digest
-		Tokens   map[JsonNumber]*rawToken
+		Keyslots map[JSONNumber]*Keyslot
+		Segments map[JSONNumber]*Segment
+		Digests  map[JSONNumber]*Digest
+		Tokens   map[JSONNumber]*rawToken
 		Config   Config
 	}
 	if err := json.Unmarshal(data, &d); err != nil {
@@ -930,10 +935,10 @@ func ReadHeader(path string, lockMode LockMode) (*HeaderInfo, error) {
 		hdr = primaryHdr
 		metadata = &primaryMetadata
 		switch {
-		case secondaryHdr.SeqId < primaryHdr.SeqId:
+		case secondaryHdr.SeqID < primaryHdr.SeqID:
 			// The secondary header is obsolete. Cryptsetup will recover this automatically.
 			fmt.Fprintf(stderr, "luks2.ReadHeader: secondary header for %s is obsolete\n", path)
-		case secondaryHdr.SeqId > primaryHdr.SeqId:
+		case secondaryHdr.SeqID > primaryHdr.SeqID:
 			// The primary header is obsolete, so use the secondary header. This shouldn't
 			// normally happen as the primary header is updated first. Cryptsetup will recover
 			// this automatically.

@@ -166,7 +166,7 @@ func (c *LoggedCmd) Start() error {
 		}
 
 		go logger(stdout, func(v ...interface{}) { c.childLogger.Debugln(v...) })
-		c.numLoggers += 1
+		c.numLoggers++
 	}
 
 	if c.Cmd.Stderr == nil {
@@ -181,7 +181,7 @@ func (c *LoggedCmd) Start() error {
 		}
 
 		go logger(stderr, func(v ...interface{}) { c.childLogger.Warningln(v...) })
-		c.numLoggers += 1
+		c.numLoggers++
 		c.closeAfterStartError = append(c.closeAfterStartError, stderr)
 	}
 
@@ -190,7 +190,11 @@ func (c *LoggedCmd) Start() error {
 	if err := c.Cmd.Start(); err != nil {
 		c.closeHandles(c.closeAfterStartError)
 		wg.Done()
-		c.waitLoggers()
+
+		if waitErr := c.waitLoggers(); waitErr != nil {
+			return fmt.Errorf("%w (failed to close logger: %s)", err, waitErr)
+		}
+
 		return err
 	}
 

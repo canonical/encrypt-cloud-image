@@ -25,30 +25,30 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/tcglog-parser"
 
-	. "gopkg.in/check.v1"
+	check "gopkg.in/check.v1"
 
-	. "github.com/canonical/encrypt-cloud-image/internal/efienv"
+	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
 type azSuite struct{}
 
-var _ = Suite(&azSuite{})
+var _ = check.Suite(&azSuite{})
 
-func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
+func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *check.C) {
 	f, err := os.Open("testdata/disk.json")
-	c.Assert(err, IsNil)
+	c.Assert(err, check.IsNil)
 
-	var profile AzDisk
+	var profile efienv.AzDisk
 	dec := json.NewDecoder(f)
-	c.Check(dec.Decode(&profile), IsNil)
-	c.Check(f.Close(), IsNil)
+	c.Check(dec.Decode(&profile), check.IsNil)
+	c.Check(f.Close(), check.IsNil)
 
-	env, err := NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
-	c.Assert(err, IsNil)
+	env, err := efienv.NewEnvironmentFromAzDiskProfile(&profile, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
+	c.Assert(err, check.IsNil)
 
 	for _, v := range []struct {
 		guid efi.GUID
@@ -72,20 +72,20 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 		},
 	} {
 		data, attrs, err := env.ReadVar(v.name, v.guid)
-		c.Check(err, IsNil)
-		c.Check(attrs, Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
+		c.Check(err, check.IsNil)
+		c.Check(attrs, check.Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 
 		expected, err := ioutil.ReadFile(filepath.Join("testdata", v.name))
-		c.Check(err, IsNil)
-		c.Check(data, DeepEquals, expected)
+		c.Check(err, check.IsNil)
+		c.Check(data, check.DeepEquals, expected)
 	}
 
 	log, err := env.ReadEventLog()
-	c.Assert(err, IsNil)
-	c.Check(log.Spec.IsEFI_2(), Equals, true)
-	c.Check(log.Algorithms, DeepEquals, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
+	c.Assert(err, check.IsNil)
+	c.Check(log.Spec.IsEFI_2(), check.Equals, true)
+	c.Check(log.Algorithms, check.DeepEquals, tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256})
 
-	c.Assert(log.Events, HasLen, 8)
+	c.Assert(log.Events, check.HasLen, 8)
 	c.Check(log.Events[0], isEFIVariableDriverConfigEvent, 7, "SecureBoot", efi.GlobalVariable, []byte{0x01})
 	c.Check(log.Events[1], isEFIVariableDriverConfigEvent, 7, "PK", efi.GlobalVariable, []byte(nil))
 	c.Check(log.Events[2], isEFIVariableDriverConfigEvent, 7, "KEK", efi.GlobalVariable, []byte(nil))
@@ -96,10 +96,10 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *C, path string) {
 	c.Check(log.Events[7], isSeparatorEvent, 4, tcglog.SeparatorEventNormalValue)
 }
 
-func (s *azSuite) TestNewEnvironmentFromAzDiskProfile1(c *C) {
-	s.testNewEnvironmentFromAzDiskProfile(c, "testdata/disk.json")
+func (s *azSuite) TestNewEnvironmentFromAzDiskProfile1(c *check.C) {
+	s.testNewEnvironmentFromAzDiskProfile(c)
 }
 
-func (s *azSuite) TestNewEnvironmentFromAzDiskProfile2(c *C) {
-	s.testNewEnvironmentFromAzDiskProfile(c, "testdata/disk2.json")
+func (s *azSuite) TestNewEnvironmentFromAzDiskProfile2(c *check.C) {
+	s.testNewEnvironmentFromAzDiskProfile(c)
 }

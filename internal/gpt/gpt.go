@@ -2,12 +2,12 @@ package gpt
 
 import (
 	"encoding/binary"
-	"fmt"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 )
 
 const (
