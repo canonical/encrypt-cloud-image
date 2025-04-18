@@ -29,7 +29,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/jessevdk/go-flags"
 
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
@@ -114,7 +114,7 @@ func populateConfigFromESLs(config *efienv.Config, path string) error {
 		if err != nil {
 			panic(err)
 		}
-		sort.Sort(sort.StringSlice(paths))
+		sort.Strings(paths)
 
 		var buf bytes.Buffer
 		for _, path := range paths {

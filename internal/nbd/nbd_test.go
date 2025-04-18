@@ -38,12 +38,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	. "gopkg.in/check.v1"
+	check "gopkg.in/check.v1"
 
-	. "github.com/canonical/encrypt-cloud-image/internal/nbd"
+	"github.com/canonical/encrypt-cloud-image/internal/nbd"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func Test(t *testing.T) { check.TestingT(t) }
 
 type nbdSuite struct {
 	testutil.BaseTest
@@ -61,22 +61,22 @@ type nbdSuite struct {
 	udevadmCmd  *testutil.MockCmd
 }
 
-func (s *nbdSuite) SetUpSuite(c *C) {
+func (s *nbdSuite) SetUpSuite(_ *check.C) {
 	s.start = time.Now()
 }
 
-func (s *nbdSuite) SetUpTest(c *C) {
+func (s *nbdSuite) SetUpTest(c *check.C) {
 	s.sysfsPath = c.MkDir()
-	s.AddCleanup(MockSysfsPath(s.sysfsPath))
-	c.Check(os.MkdirAll(filepath.Join(s.sysfsPath, "devices/virtual/block"), 0755), IsNil)
+	s.AddCleanup(nbd.MockSysfsPath(s.sysfsPath))
+	c.Check(os.MkdirAll(filepath.Join(s.sysfsPath, "devices/virtual/block"), 0755), check.IsNil)
 
 	dir := c.MkDir()
 
 	s.qemunbdStartedFifo = filepath.Join(dir, "qemunbdStarted")
-	c.Check(unix.Mkfifo(s.qemunbdStartedFifo, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.qemunbdStartedFifo, 0600), check.IsNil)
 
 	s.qemunbdExitFifo = filepath.Join(dir, "qemunbdExit")
-	c.Check(unix.Mkfifo(s.qemunbdExitFifo, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.qemunbdExitFifo, 0600), check.IsNil)
 
 	s.qemunbdKillSwitch = filepath.Join(dir, "qemunbdkillswitch")
 	synchronizationFile := filepath.Join(dir, "udevadmdone")
@@ -113,7 +113,7 @@ done`
 	s.AddCleanup(s.qemunbdCmd.Restore)
 
 	s.udevadmFifo = filepath.Join(dir, "udevadm")
-	c.Check(unix.Mkfifo(s.udevadmFifo, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.udevadmFifo, 0600), check.IsNil)
 
 	udevadmScriptTpl := `touch %[3]s
 exec %[1]s -mock-udevadm-monitor %[2]s
@@ -123,9 +123,9 @@ exec %[1]s -mock-udevadm-monitor %[2]s
 	s.AddCleanup(s.udevadmCmd.Restore)
 }
 
-func (s *nbdSuite) mockNbdModule(c *C, n int) {
-	c.Check(os.MkdirAll(filepath.Join(s.sysfsPath, "module/nbd/parameters"), 0755), IsNil)
-	c.Check(ioutil.WriteFile(filepath.Join(s.sysfsPath, "module/nbd/parameters/nbds_max"), []byte(strconv.Itoa(n)), 0644), IsNil)
+func (s *nbdSuite) mockNbdModule(c *check.C, n int) {
+	c.Check(os.MkdirAll(filepath.Join(s.sysfsPath, "module/nbd/parameters"), 0755), check.IsNil)
+	c.Check(ioutil.WriteFile(filepath.Join(s.sysfsPath, "module/nbd/parameters/nbds_max"), []byte(strconv.Itoa(n)), 0644), check.IsNil)
 }
 
 func (s *nbdSuite) waitForQemuNbd(path string, iter int) (int, error) {
@@ -159,7 +159,7 @@ func (s *nbdSuite) waitForQemuNbd(path string, iter int) (int, error) {
 						}
 						return pid, nil
 					}
-					i += 1
+					i++
 				}
 
 				f, err = os.OpenFile(s.qemunbdExitFifo, os.O_WRONLY, 0)
@@ -210,15 +210,15 @@ func (s *nbdSuite) simulateKernelUevent(action, path, subsystem string) error {
 	d := time.Since(s.start)
 	sec := d / time.Second
 	usec := (d - sec) / time.Microsecond
-	_, err = f.WriteString(fmt.Sprintf("KERNEL[%d.%06d] %-8s %s (%s)\n", sec, usec, action, path, subsystem))
+	_, err = fmt.Fprintf(f, "KERNEL[%d.%06d] %-8s %s (%s)\n", sec, usec, action, path, subsystem)
 	return err
 }
 
-var _ = Suite(&nbdSuite{})
+var _ = check.Suite(&nbdSuite{})
 
-func (s *nbdSuite) TestConnectNoNBD(c *C) {
-	_, err := ConnectImage("/path/to/image")
-	c.Check(err, ErrorMatches, "nbd kernel module is not loaded")
+func (s *nbdSuite) TestConnectNoNBD(c *check.C) {
+	_, err := nbd.ConnectImage("/path/to/image")
+	c.Check(err, check.ErrorMatches, "nbd kernel module is not loaded")
 }
 
 type simulatedUevent struct {
@@ -236,14 +236,14 @@ type testConnectImageData struct {
 	uevents       []simulatedUevent
 }
 
-func (s *nbdSuite) testConnectImage(c *C, data *testConnectImageData) {
+func (s *nbdSuite) testConnectImage(c *check.C, data *testConnectImageData) {
 	s.mockNbdModule(c, data.maxNbds)
 
 	for i := 0; i < data.maxNbds; i++ {
 		if i == data.dev {
 			continue
 		}
-		c.Check(s.mockNbdConnection(fmt.Sprintf(filepath.Join("devices/virtual/block/nbd%d"), i), 1), IsNil)
+		c.Check(s.mockNbdConnection(fmt.Sprintf(filepath.Join("devices/virtual/block/nbd%d"), i), 1), check.IsNil)
 	}
 
 	devPath := fmt.Sprintf(filepath.Join("/dev/nbd%d"), data.dev)
@@ -275,23 +275,23 @@ func (s *nbdSuite) testConnectImage(c *C, data *testConnectImageData) {
 		helperDone <- err
 	}()
 
-	conn, err := ConnectImage(data.sourcePath)
-	c.Check(<-helperDone, IsNil)
-	c.Assert(err, IsNil)
+	conn, err := nbd.ConnectImage(data.sourcePath)
+	c.Check(<-helperDone, check.IsNil)
+	c.Assert(err, check.IsNil)
 
-	c.Check(conn.SourcePath(), Equals, data.sourcePath)
-	c.Check(conn.DevPath(), Equals, devPath)
-	c.Check(conn.Disconnect(), IsNil)
+	c.Check(conn.SourcePath(), check.Equals, data.sourcePath)
+	c.Check(conn.DevPath(), check.Equals, devPath)
+	c.Check(conn.Disconnect(), check.IsNil)
 
-	c.Assert(s.udevadmCmd.Calls(), HasLen, data.expectedTries)
-	c.Check(s.udevadmCmd.Calls()[0], DeepEquals, []string{"udevadm", "monitor", "--kernel"})
+	c.Assert(s.udevadmCmd.Calls(), check.HasLen, data.expectedTries)
+	c.Check(s.udevadmCmd.Calls()[0], check.DeepEquals, []string{"udevadm", "monitor", "--kernel"})
 
-	c.Assert(s.qemunbdCmd.Calls(), HasLen, data.expectedTries+1)
-	c.Check(s.qemunbdCmd.Calls()[data.expectedTries-1], DeepEquals, []string{"qemu-nbd", "-v", "-c", devPath, data.sourcePath})
-	c.Check(s.qemunbdCmd.Calls()[data.expectedTries], DeepEquals, []string{"qemu-nbd", "-d", devPath})
+	c.Assert(s.qemunbdCmd.Calls(), check.HasLen, data.expectedTries+1)
+	c.Check(s.qemunbdCmd.Calls()[data.expectedTries-1], check.DeepEquals, []string{"qemu-nbd", "-v", "-c", devPath, data.sourcePath})
+	c.Check(s.qemunbdCmd.Calls()[data.expectedTries], check.DeepEquals, []string{"qemu-nbd", "-d", devPath})
 }
 
-func (s *nbdSuite) TestConnectImage1(c *C) {
+func (s *nbdSuite) TestConnectImage1(c *check.C) {
 	s.testConnectImage(c, &testConnectImageData{
 		maxNbds:       16,
 		sourcePath:    "/path/to/image",
@@ -303,7 +303,7 @@ func (s *nbdSuite) TestConnectImage1(c *C) {
 			{"add", "/devices/virtual/block/nbd0/nbd0p1", "block"}}})
 }
 
-func (s *nbdSuite) TestConnectImage2(c *C) {
+func (s *nbdSuite) TestConnectImage2(c *check.C) {
 	s.testConnectImage(c, &testConnectImageData{
 		maxNbds:       16,
 		sourcePath:    "/path/to/other/image",
@@ -315,7 +315,7 @@ func (s *nbdSuite) TestConnectImage2(c *C) {
 			{"add", "/devices/virtual/block/nbd12/nbd12p1", "block"}}})
 }
 
-func (s *nbdSuite) TestConnectImage3(c *C) {
+func (s *nbdSuite) TestConnectImage3(c *check.C) {
 	s.testConnectImage(c, &testConnectImageData{
 		maxNbds:       16,
 		sourcePath:    "/path/to/image",
@@ -327,59 +327,59 @@ func (s *nbdSuite) TestConnectImage3(c *C) {
 			{"add", "/devices/virtual/block/nbd2/nbd2p1", "block"}}})
 }
 
-func (s *nbdSuite) TestConnectFail(c *C) {
+func (s *nbdSuite) TestConnectFail(c *check.C) {
 	nbDevices := 5
 	s.mockNbdModule(c, nbDevices)
 
 	for i := 0; i < nbDevices; i++ {
-		c.Check(s.mockNbdConnection(fmt.Sprintf(filepath.Join("devices/virtual/block/nbd%d"), i), 1), IsNil)
+		c.Check(s.mockNbdConnection(fmt.Sprintf(filepath.Join("devices/virtual/block/nbd%d"), i), 1), check.IsNil)
 	}
 
 	f, err := os.OpenFile(s.qemunbdKillSwitch, os.O_RDWR|os.O_CREATE, 0644)
-	c.Assert(err, IsNil)
-	c.Check(f.Close(), IsNil)
+	c.Assert(err, check.IsNil)
+	c.Check(f.Close(), check.IsNil)
 
-	_, err = ConnectImage("/path/to/image")
-	c.Check(err, ErrorMatches, "no device is available")
+	_, err = nbd.ConnectImage("/path/to/image")
+	c.Check(err, check.ErrorMatches, "no device is available")
 
-	c.Check(s.udevadmCmd.Calls(), HasLen, nbDevices*100)
-	c.Check(s.qemunbdCmd.Calls(), HasLen, nbDevices*100)
+	c.Check(s.udevadmCmd.Calls(), check.HasLen, nbDevices*100)
+	c.Check(s.qemunbdCmd.Calls(), check.HasLen, nbDevices*100)
 }
 
 type testGetImageTypeHintData struct {
 	path     string
-	expected ImageType
+	expected nbd.ImageType
 }
 
-func (s *nbdSuite) testGetImageTypeHint(c *C, data *testGetImageTypeHintData) {
-	c.Check(GetImageTypeHint(data.path), Equals, data.expected)
+func (s *nbdSuite) testGetImageTypeHint(c *check.C, data *testGetImageTypeHintData) {
+	c.Check(nbd.GetImageTypeHint(data.path), check.Equals, data.expected)
 }
 
-func (s *nbdSuite) TestGetImageTypeHintFixedVHD(c *C) {
+func (s *nbdSuite) TestGetImageTypeHintFixedVHD(c *check.C) {
 	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
 		path:     "testdata/fixed.vhd",
-		expected: ImageTypeFixedVHD,
+		expected: nbd.ImageTypeFixedVHD,
 	})
 }
 
-func (s *nbdSuite) TestGetImageTypeHintDynamicVHD(c *C) {
+func (s *nbdSuite) TestGetImageTypeHintDynamicVHD(c *check.C) {
 	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
 		path:     "testdata/dynamic.vhd",
-		expected: ImageTypeAutodetect,
+		expected: nbd.ImageTypeAutodetect,
 	})
 }
 
-func (s *nbdSuite) TestGetImageTypeHintQCow2(c *C) {
+func (s *nbdSuite) TestGetImageTypeHintQCow2(c *check.C) {
 	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
 		path:     "testdata/test.qcow2",
-		expected: ImageTypeAutodetect,
+		expected: nbd.ImageTypeAutodetect,
 	})
 }
 
-func (s *nbdSuite) TestGetImageTypeHintRaw(c *C) {
+func (s *nbdSuite) TestGetImageTypeHintRaw(c *check.C) {
 	s.testGetImageTypeHint(c, &testGetImageTypeHintData{
 		path:     "testdata/test.raw",
-		expected: ImageTypeRaw,
+		expected: nbd.ImageTypeRaw,
 	})
 }
 
@@ -403,8 +403,6 @@ func runMockUdevadmMonitor() int {
 			return 1
 		}
 	}
-
-	return 0
 }
 
 func runMockQemuNbd() int {

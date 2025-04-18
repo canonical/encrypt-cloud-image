@@ -27,14 +27,14 @@ import (
 	"io"
 	"os"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/canonical/encrypt-cloud-image/internal/efienv"
 )
 
 var (
-	msOwnerGuid = efi.MakeGUID(0x77fa9abd, 0x0359, 0x4d32, 0xbd60, [...]uint8{0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b})
+	msOwnerGUID = efi.MakeGUID(0x77fa9abd, 0x0359, 0x4d32, 0xbd60, [...]uint8{0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b})
 )
 
 func encodeAzSignatureDb(db efi.SignatureDatabase) (out []*efienv.AzUefiSignatureList, err error) {
@@ -51,7 +51,7 @@ func encodeAzSignatureDb(db efi.SignatureDatabase) (out []*efienv.AzUefiSignatur
 		}
 
 		for _, s := range l.Signatures {
-			if s.Owner != msOwnerGuid {
+			if s.Owner != msOwnerGUID {
 				return nil, fmt.Errorf("invalid owner ID: %v", s.Owner)
 			}
 

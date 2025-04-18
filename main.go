@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 
@@ -87,9 +87,9 @@ func (b *encryptCloudImageBase) getDevPathFormat() (string, error) {
 		return "%sp%d", nil
 	} else if strings.HasPrefix(b.devPath, "/dev/sd") || strings.HasPrefix(b.devPath, "/dev/vd") {
 		return "%s%d", nil
-	} else {
-		return "", fmt.Errorf("Unsupported device path: %s. Please look at the code to determine what is currently supported.", b.devPath)
 	}
+
+	return "", fmt.Errorf("unsupported device path: %s. Please look at the code to determine what is currently supported", b.devPath)
 }
 
 func (b *encryptCloudImageBase) isNbdDevice() bool {
@@ -164,7 +164,7 @@ func (b *encryptCloudImageBase) exitScope() {
 		b.cleanupHandlers[0] = b.cleanupHandlers[0][:l-1]
 		if err := fn(); err != nil {
 			log.WithError(err).Errorln(err)
-			n += 1
+			n++
 		}
 	}
 

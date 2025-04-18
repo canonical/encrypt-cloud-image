@@ -24,13 +24,13 @@ import (
 	"fmt"
 
 	//"github.com/Azure/azure-sdk-for-go/sdk/profiles/latest/armcompute"
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
 	secboot_efi "github.com/snapcore/secboot/efi"
 )
 
 var (
-	msOwnerGuid = efi.MakeGUID(0x77fa9abd, 0x0359, 0x4d32, 0xbd60, [...]uint8{0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b})
+	msOwnerGUID = efi.MakeGUID(0x77fa9abd, 0x0359, 0x4d32, 0xbd60, [...]uint8{0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b})
 )
 
 type AzUefiSignatureList struct {
@@ -67,12 +67,12 @@ func decodeAzSignatureDb(azdb []*AzUefiSignatureList) (out efi.SignatureDatabase
 			for _, data := range azl.Value {
 				out = append(out, &efi.SignatureList{
 					Type:       efi.CertX509Guid,
-					Signatures: []*efi.SignatureData{{Owner: msOwnerGuid, Data: data}}})
+					Signatures: []*efi.SignatureData{{Owner: msOwnerGUID, Data: data}}})
 			}
 		case "sha256":
 			l := &efi.SignatureList{Type: efi.CertSHA256Guid}
 			for _, data := range azl.Value {
-				l.Signatures = append(l.Signatures, &efi.SignatureData{Owner: msOwnerGuid, Data: data})
+				l.Signatures = append(l.Signatures, &efi.SignatureData{Owner: msOwnerGUID, Data: data})
 			}
 			out = append(out, l)
 		default:

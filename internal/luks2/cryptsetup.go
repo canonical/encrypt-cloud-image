@@ -247,26 +247,35 @@ func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) 
 		if err != nil {
 			// If we fail to open the write end, the read end will be blocked in open(), so
 			// kill the process.
-			cmd.Process.Kill()
-			return fmt.Errorf("cannot open FIFO for passing existing key to cryptsetup: %w", err)
+			baseErr := fmt.Errorf("cannot open FIFO for passing existing key to cryptsetup: %w", err)
+			if killErr := cmd.Process.Kill(); killErr != nil {
+				return fmt.Errorf("%w (failed to kill process: %s)", err, killErr)
+			}
+			return baseErr
 		}
 
 		if _, err := f.Write(existingKey); err != nil {
 			// The read end is open and blocked inside read(). Closing our write end will result in the
 			// read end returning 0 bytes (EOF) and continuing cleanly.
+			baseErr := fmt.Errorf("cannot pass existing key to cryptsetup: %w", err)
 			if err := f.Close(); err != nil {
 				// If we can't close the write end, the read end will remain blocked inside read(),
 				// so kill the process.
-				cmd.Process.Kill()
+				if killErr := cmd.Process.Kill(); killErr != nil {
+					return fmt.Errorf("%w (failed to kill process: %s)", err, killErr)
+				}
 			}
-			return fmt.Errorf("cannot pass existing key to cryptsetup: %w", err)
+			return baseErr
 		}
 
 		if err := f.Close(); err != nil {
 			// If we can't close the write end, the read end will remain blocked inside read(),
 			// so kill the process.
-			cmd.Process.Kill()
-			return fmt.Errorf("cannot close write end of FIFO: %w", err)
+			baseErr := fmt.Errorf("cannot close write end of FIFO: %w", err)
+			if killErr := cmd.Process.Kill(); killErr != nil {
+				return fmt.Errorf("%w (failed to kill process: %s)", err, killErr)
+			}
+			return baseErr
 		}
 
 		return nil
