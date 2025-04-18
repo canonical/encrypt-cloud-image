@@ -12,6 +12,19 @@ env:
   CGO_ENABLED: 0
 
 jobs:
+  golangci-lint:
+      name: lint
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-go@v5
+          with:
+            go-version-file: './go.mod'
+        - name: golangci-lint
+          uses: golangci/golangci-lint-action@v7
+          with:
+            version: v2.1.2
+
   test:
     runs-on: ubuntu-latest
 
