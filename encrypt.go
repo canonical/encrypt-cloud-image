@@ -84,32 +84,52 @@ func getBlockDeviceSize(path string) (int64, error) {
 }
 
 func luks2Encrypt(path string, key []byte) error {
-	cmd := internal_exec.LoggedCommand("cryptsetup",
-		// verbose
-		"-v",
-		// batch processing, no password verification for formatting an existing LUKS container
-		"-q",
-		// encrypt plaintext volume
-		"reencrypt", "--encrypt",
-		// use LUKS2
-		"--type", "luks2",
-		// read the key from stdin
-		"--key-file", "-",
-		// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
-		"--cipher", "aes-xts-plain64", "--key-size", "512",
-		// use argon2i as the KDF
-		"--pbkdf", "argon2i",
-		// set the minimum KDF cost parameters
-		"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
-		// set the default metadata size to 512KiB
-		"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
-		// specify the keyslots area size of 16MiB - (2 * 512KiB)
-		"--luks2-keyslots-size", fmt.Sprintf("%dk", luks2HeaderKiBSize-(2*luks2MetadataKiBSize)),
-		// reduce the device size by 2 * the header size, as required by cryptsetup
-		"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
-		path)
-	cmd.Stdin = bytes.NewReader(key)
+	var cmd *internal_exec.LoggedCmd
+	if _, err := os.Stat("/usr/sbin/cryptsetup-reencrypt"); err == nil {
+		log.Debugln("using cryptsetup-reencrypt")
+		cmd = internal_exec.LoggedCommand("cryptsetup-reencrypt",
+			"-N",
+			"-v",
+			"-q",
+			"--type", "luks2",
+			// read the key from stdin
+			"--key-file", "-",
+			"--cipher", "aes-xts-plain64", "--key-size", "512",
+			// use argon2i as the KDF
+			"--pbkdf", "argon2i",
+			// set the minimum KDF cost parameters
+			"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
+			"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
+			path)
 
+	} else {
+		cmd = internal_exec.LoggedCommand("cryptsetup",
+			// verbose
+			"-v",
+			// batch processing, no password verification for formatting an existing LUKS container
+			"-q",
+			// encrypt plaintext volume
+			"reencrypt", "--encrypt",
+			// use LUKS2
+			"--type", "luks2",
+			// read the key from stdin
+			"--key-file", "-",
+			// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
+			"--cipher", "aes-xts-plain64", "--key-size", "512",
+			// use argon2i as the KDF
+			"--pbkdf", "argon2i",
+			// set the minimum KDF cost parameters
+			"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
+			// set the default metadata size to 512KiB
+			"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
+			// specify the keyslots area size of 16MiB - (2 * 512KiB)
+			"--luks2-keyslots-size", fmt.Sprintf("%dk", luks2HeaderKiBSize-(2*luks2MetadataKiBSize)),
+			// reduce the device size by 2 * the header size, as required by cryptsetup
+			"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
+			path)
+	}
+
+	cmd.Stdin = bytes.NewReader(key)
 	return cmd.Run()
 }
 
