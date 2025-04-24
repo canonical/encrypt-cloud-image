@@ -294,7 +294,10 @@ func (c *Connection) tryConnectToDevice(dev nbdDev) (err error) {
 		if err := udevadmCmd.Process.Kill(); err != nil {
 			log.WithError(err).Panicln("cannot kill udevadm monitor")
 		}
-		udevadmCmd.Wait()
+
+		if err := udevadmCmd.Wait(); err != nil {
+			c.logger.Debugln("error received while waiting for udevadm monitor to finish: %s", err)
+		}
 
 		c.logger.Debugln("waiting for udevadm monitor scanner goroutine to finish")
 	Loop:

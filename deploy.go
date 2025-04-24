@@ -241,7 +241,9 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 
 		// snap-bootstrap measures an epoch
 		h := crypto.SHA256.New()
-		binary.Write(h, binary.LittleEndian, uint32(0))
+		if err := binary.Write(h, binary.LittleEndian, uint32(0)); err != nil {
+			return nil, err
+		}
 		pcrProfile.ExtendPCR(tpm2.HashAlgorithmSHA256, 12, h.Sum(nil))
 	}
 
@@ -271,7 +273,6 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 
 	return pcrProfile, nil
 }
-
 func (d *imageDeployer) newEFIEnvironment() (secboot_efi.HostEnvironment, error) {
 	log.Infoln("creating EFI environment for guest")
 	switch {

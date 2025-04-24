@@ -37,12 +37,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	. "gopkg.in/check.v1"
+	check "gopkg.in/check.v1"
 
-	. "github.com/canonical/encrypt-cloud-image/internal/exec"
+	"github.com/canonical/encrypt-cloud-image/internal/exec"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func Test(t *testing.T) { check.TestingT(t) }
 
 type logHook struct {
 	mu      sync.Mutex
@@ -51,7 +51,7 @@ type logHook struct {
 	entries []*log.Entry
 }
 
-func (h *logHook) recvEntry(c *C) *log.Entry {
+func (h *logHook) recvEntry(c *check.C) *log.Entry {
 	deadline := time.After(5 * time.Second)
 
 	for {
@@ -130,7 +130,7 @@ type execSuite struct {
 	cmd *testutil.MockCmd
 }
 
-func (s *execSuite) SetUpSuite(c *C) {
+func (s *execSuite) SetUpSuite(c *check.C) {
 	s.savedLevel = log.StandardLogger().Level
 	s.savedLogDest = log.StandardLogger().Out
 	log.SetLevel(log.DebugLevel)
@@ -139,30 +139,30 @@ func (s *execSuite) SetUpSuite(c *C) {
 	dir := c.MkDir()
 
 	s.stdout = filepath.Join(dir, "stdout")
-	c.Check(unix.Mkfifo(s.stdout, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.stdout, 0600), check.IsNil)
 
 	s.stderr = filepath.Join(dir, "stderr")
-	c.Check(unix.Mkfifo(s.stderr, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.stderr, 0600), check.IsNil)
 
 	s.exit = filepath.Join(dir, "exit")
-	c.Check(unix.Mkfifo(s.exit, 0600), IsNil)
+	c.Check(unix.Mkfifo(s.exit, 0600), check.IsNil)
 
 	scriptTpl := `exec %[1]s -child -stdout %[2]s -stderr %[3]s -exit %[4]s`
 
 	s.cmd = testutil.MockCommand(c, "cmd", fmt.Sprintf(scriptTpl, os.Args[0], s.stdout, s.stderr, s.exit))
 }
 
-func (s *execSuite) SetUpTest(c *C) {
+func (s *execSuite) SetUpTest(_ *check.C) {
 	s.savedHooks = log.StandardLogger().Hooks
 	s.log = &logHook{}
 	log.AddHook(s.log)
 }
 
-func (s *execSuite) TearDownTest(c *C) {
+func (s *execSuite) TearDownTest(_ *check.C) {
 	log.StandardLogger().ReplaceHooks(s.savedHooks)
 }
 
-func (s *execSuite) TearDownSuite(c *C) {
+func (s *execSuite) TearDownSuite(_ *check.C) {
 	if s.cmd != nil {
 		s.cmd.Restore()
 	}
@@ -170,7 +170,7 @@ func (s *execSuite) TearDownSuite(c *C) {
 	log.SetOutput(s.savedLogDest)
 }
 
-func (s *execSuite) runAsync(cmd *LoggedCmd) <-chan error {
+func (s *execSuite) runAsync(cmd *exec.LoggedCmd) <-chan error {
 	c := make(chan error)
 	go func() {
 		c <- cmd.Run()
@@ -178,7 +178,7 @@ func (s *execSuite) runAsync(cmd *LoggedCmd) <-chan error {
 	return c
 }
 
-func (s *execSuite) sendBytes(c *C, path string, data []byte) {
+func (s *execSuite) sendBytes(c *check.C, path string, data []byte) {
 	done := make(chan error)
 
 	go func() {
@@ -197,121 +197,121 @@ func (s *execSuite) sendBytes(c *C, path string, data []byte) {
 
 	select {
 	case err := <-done:
-		c.Assert(err, IsNil)
+		c.Assert(err, check.IsNil)
 	case <-time.After(5 * time.Second):
 		c.Fatalf("timed out trying to send bytes")
 	}
 }
 
-func (s *execSuite) sendStdout(c *C, str string) {
+func (s *execSuite) sendStdout(c *check.C, str string) {
 	s.sendBytes(c, s.stdout, []byte(str))
 }
 
-func (s *execSuite) sendStderr(c *C, str string) {
+func (s *execSuite) sendStderr(c *check.C, str string) {
 	s.sendBytes(c, s.stderr, []byte(str))
 }
 
-func (s *execSuite) sendExit(c *C, n int) {
+func (s *execSuite) sendExit(c *check.C, n int) {
 	s.sendBytes(c, s.exit, []byte(strconv.Itoa(n)))
 }
 
-var _ = Suite(&execSuite{})
+var _ = check.Suite(&execSuite{})
 
-func (s *execSuite) TestLoggedCommandArgs(c *C) {
-	cmd := LoggedCommand("cmd", "--foo", "bar")
+func (s *execSuite) TestLoggedCommandArgs(c *check.C) {
+	cmd := exec.LoggedCommand("cmd", "--foo", "bar")
 	cmdErr := s.runAsync(cmd)
 
 	s.sendExit(c, 0)
-	c.Check(<-cmdErr, IsNil)
-	c.Assert(s.cmd.Calls(), HasLen, 1)
-	c.Check(s.cmd.Calls()[0], DeepEquals, []string{"cmd", "--foo", "bar"})
+	c.Check(<-cmdErr, check.IsNil)
+	c.Assert(s.cmd.Calls(), check.HasLen, 1)
+	c.Check(s.cmd.Calls()[0], check.DeepEquals, []string{"cmd", "--foo", "bar"})
 }
 
-func (s *execSuite) TestLoggedCommandNotFound(c *C) {
-	cmd := LoggedCommand("xxxxxxxxxxxxxxxxxx")
-	c.Check(cmd.Start(), ErrorMatches, "exec: \"xxxxxxxxxxxxxxxxxx\": executable file not found in \\$PATH")
+func (s *execSuite) TestLoggedCommandNotFound(c *check.C) {
+	cmd := exec.LoggedCommand("xxxxxxxxxxxxxxxxxx")
+	c.Check(cmd.Start(), check.ErrorMatches, "exec: \"xxxxxxxxxxxxxxxxxx\": executable file not found in \\$PATH")
 	_, err := cmd.Cmd.Stdout.Write([]byte{0})
-	c.Check(err, ErrorMatches, "write |1: file already closed")
+	c.Check(err, check.ErrorMatches, "write |1: file already closed")
 	_, err = cmd.Cmd.Stderr.Write([]byte{0})
-	c.Check(err, ErrorMatches, "write |1: file already closed")
+	c.Check(err, check.ErrorMatches, "write |1: file already closed")
 }
 
-func (s *execSuite) TestLoggedCommandError(c *C) {
-	cmd := LoggedCommand("cmd")
+func (s *execSuite) TestLoggedCommandError(c *check.C) {
+	cmd := exec.LoggedCommand("cmd")
 	cmdErr := s.runAsync(cmd)
 
 	s.sendExit(c, 1)
-	c.Check(<-cmdErr, ErrorMatches, "exit status 1")
+	c.Check(<-cmdErr, check.ErrorMatches, "exit status 1")
 }
 
-func (s *execSuite) TestLoggedCommandStdout(c *C) {
-	cmd := LoggedCommand("cmd")
-	c.Check(cmd.Start(), IsNil)
+func (s *execSuite) TestLoggedCommandStdout(c *check.C) {
+	cmd := exec.LoggedCommand("cmd")
+	c.Check(cmd.Start(), check.IsNil)
 
 	s.sendStdout(c, "hello world\n")
 
 	entry := s.log.recvEntry(c)
-	c.Check(entry.Level, Equals, log.DebugLevel)
-	c.Check(entry.Message, Equals, "hello world")
+	c.Check(entry.Level, check.Equals, log.DebugLevel)
+	c.Check(entry.Message, check.Equals, "hello world")
 
 	s.sendExit(c, 0)
-	c.Check(cmd.Wait(), IsNil)
+	c.Check(cmd.Wait(), check.IsNil)
 }
 
-func (s *execSuite) TestLoggedCommandStderr(c *C) {
-	cmd := LoggedCommand("cmd")
-	c.Check(cmd.Start(), IsNil)
+func (s *execSuite) TestLoggedCommandStderr(c *check.C) {
+	cmd := exec.LoggedCommand("cmd")
+	c.Check(cmd.Start(), check.IsNil)
 
 	s.sendStderr(c, "dlrow olleh\n")
 
 	entry := s.log.recvEntry(c)
-	c.Check(entry.Level, Equals, log.WarnLevel)
-	c.Check(entry.Message, Equals, "dlrow olleh")
+	c.Check(entry.Level, check.Equals, log.WarnLevel)
+	c.Check(entry.Message, check.Equals, "dlrow olleh")
 
 	s.sendExit(c, 0)
-	c.Check(cmd.Wait(), IsNil)
+	c.Check(cmd.Wait(), check.IsNil)
 }
 
-func (s *execSuite) TestLoggedCommandStdoutPipe(c *C) {
-	cmd := LoggedCommand("cmd")
+func (s *execSuite) TestLoggedCommandStdoutPipe(c *check.C) {
+	cmd := exec.LoggedCommand("cmd")
 	rc, err := cmd.StdoutPipe()
-	c.Assert(err, IsNil)
+	c.Assert(err, check.IsNil)
 
-	c.Check(cmd.Start(), IsNil)
+	c.Check(cmd.Start(), check.IsNil)
 
 	s.sendStdout(c, "hello world\n")
 
 	entry := s.log.recvEntry(c)
-	c.Check(entry.Level, Equals, log.DebugLevel)
-	c.Check(entry.Message, Equals, "hello world")
+	c.Check(entry.Level, check.Equals, log.DebugLevel)
+	c.Check(entry.Message, check.Equals, "hello world")
 
 	scanner := bufio.NewScanner(rc)
 	scanner.Scan()
-	c.Check(scanner.Text(), Equals, "hello world")
+	c.Check(scanner.Text(), check.Equals, "hello world")
 
 	s.sendExit(c, 0)
-	c.Check(cmd.Wait(), IsNil)
+	c.Check(cmd.Wait(), check.IsNil)
 }
 
-func (s *execSuite) TestLoggedCommandStderrPipe(c *C) {
-	cmd := LoggedCommand("cmd")
+func (s *execSuite) TestLoggedCommandStderrPipe(c *check.C) {
+	cmd := exec.LoggedCommand("cmd")
 	rc, err := cmd.StderrPipe()
-	c.Assert(err, IsNil)
+	c.Assert(err, check.IsNil)
 
-	c.Check(cmd.Start(), IsNil)
+	c.Check(cmd.Start(), check.IsNil)
 
 	s.sendStderr(c, "dlrow olleh\n")
 
 	entry := s.log.recvEntry(c)
-	c.Check(entry.Level, Equals, log.WarnLevel)
-	c.Check(entry.Message, Equals, "dlrow olleh")
+	c.Check(entry.Level, check.Equals, log.WarnLevel)
+	c.Check(entry.Message, check.Equals, "dlrow olleh")
 
 	scanner := bufio.NewScanner(rc)
 	scanner.Scan()
-	c.Check(scanner.Text(), Equals, "dlrow olleh")
+	c.Check(scanner.Text(), check.Equals, "dlrow olleh")
 
 	s.sendExit(c, 0)
-	c.Check(cmd.Wait(), IsNil)
+	c.Check(cmd.Wait(), check.IsNil)
 }
 
 var (
@@ -337,7 +337,6 @@ func runChild() int {
 				return
 			}
 		}
-
 	}
 
 	go loggerProxy(os.Stdout, *stdoutPath)
@@ -369,7 +368,7 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 	if !*child {
 		os.Exit(m.Run())
-	} else {
-		os.Exit(runChild())
 	}
+
+	os.Exit(runChild())
 }

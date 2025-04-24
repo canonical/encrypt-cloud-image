@@ -20,7 +20,7 @@
 package efienv
 
 import (
-	"github.com/canonical/go-efilib"
+	efi "github.com/canonical/go-efilib"
 	"github.com/canonical/tcglog-parser"
 	secboot_efi "github.com/snapcore/secboot/efi"
 )

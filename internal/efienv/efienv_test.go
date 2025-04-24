@@ -28,32 +28,37 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/canonical/go-efilib"
+	"github.com/canonical/encrypt-cloud-image/internal/efienv"
+	efi "github.com/canonical/go-efilib"
 	"github.com/canonical/go-tpm2"
 	"github.com/canonical/tcglog-parser"
 
-	. "gopkg.in/check.v1"
-
-	. "github.com/canonical/encrypt-cloud-image/internal/efienv"
+	check "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func Test(t *testing.T) { check.TestingT(t) }
 
 type isEFIVariableDriverConfigEventChecker struct {
-	*CheckerInfo
+	*check.CheckerInfo
 }
 
-var isEFIVariableDriverConfigEvent = &isEFIVariableDriverConfigEventChecker{
-	&CheckerInfo{Name: "isVariableDriverConfigEvent", Params: []string{"event", "pcr", "varName", "varGuid", "varData"}}}
+var (
+	invalidEventTypeErrStr = "invalid event type"
+	invalidPCRIndexErrStr  = "invalid PCR index"
+	invalidDigestErrStr    = "invalid digest"
+)
 
-func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}, names []string) (result bool, error string) {
+var isEFIVariableDriverConfigEvent = &isEFIVariableDriverConfigEventChecker{
+	&check.CheckerInfo{Name: "isVariableDriverConfigEvent", Params: []string{"event", "pcr", "varName", "varGuid", "varData"}}}
+
+func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}, names []string) (result bool, errorName string) {
 	e, ok := params[0].(*tcglog.Event)
 	if !ok {
 		return false, names[0] + " is not an event"
 	}
 
 	if e.EventType != tcglog.EventTypeEFIVariableDriverConfig {
-		return false, "invalid event type"
+		return false, invalidEventTypeErrStr
 	}
 
 	pcr, ok := params[1].(int)
@@ -61,7 +66,7 @@ func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}
 		return false, names[1] + "is not a PCR index"
 	}
 	if tcglog.PCRIndex(pcr) != e.PCRIndex {
-		return false, "invalid PCR index"
+		return false, invalidPCRIndexErrStr
 	}
 
 	data, ok := e.Data.(*tcglog.EFIVariableData)
@@ -92,7 +97,7 @@ func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}
 	for alg, digest := range e.Digests {
 		expected := tcglog.ComputeEFIVariableDataDigest(alg.GetHash(), data.UnicodeName, data.VariableName, data.VariableData)
 		if !bytes.Equal(digest, expected) {
-			return false, "invalid digest"
+			return false, invalidDigestErrStr
 		}
 	}
 
@@ -100,20 +105,20 @@ func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}
 }
 
 type isSeparatorEventChecker struct {
-	*CheckerInfo
+	*check.CheckerInfo
 }
 
 var isSeparatorEvent = &isSeparatorEventChecker{
-	&CheckerInfo{Name: "isSeparatorEvent", Params: []string{"event", "pcr", "value"}}}
+	&check.CheckerInfo{Name: "isSeparatorEvent", Params: []string{"event", "pcr", "value"}}}
 
-func (checker *isSeparatorEventChecker) Check(params []interface{}, names []string) (result bool, error string) {
+func (checker *isSeparatorEventChecker) Check(params []interface{}, names []string) (result bool, errorStr string) {
 	e, ok := params[0].(*tcglog.Event)
 	if !ok {
 		return false, names[0] + " is not an event"
 	}
 
 	if e.EventType != tcglog.EventTypeSeparator {
-		return false, "invalid event type"
+		return false, invalidEventTypeErrStr
 	}
 
 	pcr, ok := params[1].(int)
@@ -121,7 +126,7 @@ func (checker *isSeparatorEventChecker) Check(params []interface{}, names []stri
 		return false, names[1] + "is not a PCR index"
 	}
 	if tcglog.PCRIndex(pcr) != e.PCRIndex {
-		return false, "invalid PCR index"
+		return false, invalidPCRIndexErrStr
 	}
 
 	data, ok := e.Data.(*tcglog.SeparatorEventData)
@@ -140,7 +145,7 @@ func (checker *isSeparatorEventChecker) Check(params []interface{}, names []stri
 	for alg, digest := range e.Digests {
 		expected := tcglog.ComputeSeparatorEventDigest(alg.GetHash(), value)
 		if !bytes.Equal(digest, expected) {
-			return false, "invalid digest"
+			return false, invalidDigestErrStr
 		}
 	}
 
@@ -148,22 +153,22 @@ func (checker *isSeparatorEventChecker) Check(params []interface{}, names []stri
 }
 
 type isEFIActionEventChecker struct {
-	*CheckerInfo
+	*check.CheckerInfo
 }
 
 var isEFIActionEvent = &isEFIActionEventChecker{
-	&CheckerInfo{
+	&check.CheckerInfo{
 		Name:   "isEFIActionEvent",
 		Params: []string{"event", "pcr", "action"}}}
 
-func (checker *isEFIActionEventChecker) Check(params []interface{}, names []string) (result bool, error string) {
+func (checker *isEFIActionEventChecker) Check(params []interface{}, names []string) (result bool, errorStr string) {
 	e, ok := params[0].(*tcglog.Event)
 	if !ok {
 		return false, names[0] + " is not an event"
 	}
 
 	if e.EventType != tcglog.EventTypeEFIAction {
-		return false, "invalid event type"
+		return false, invalidEventTypeErrStr
 	}
 
 	pcr, ok := params[1].(int)
@@ -171,7 +176,7 @@ func (checker *isEFIActionEventChecker) Check(params []interface{}, names []stri
 		return false, names[1] + "is not a PCR index"
 	}
 	if tcglog.PCRIndex(pcr) != e.PCRIndex {
-		return false, "invalid PCR index"
+		return false, invalidPCRIndexErrStr
 	}
 
 	if e.Data != params[2] {
@@ -181,7 +186,7 @@ func (checker *isEFIActionEventChecker) Check(params []interface{}, names []stri
 	for alg, digest := range e.Digests {
 		expected := tcglog.ComputeStringEventDigest(alg.GetHash(), e.Data.String())
 		if !bytes.Equal(digest, expected) {
-			return false, "invalid digest"
+			return false, invalidDigestErrStr
 		}
 	}
 
@@ -190,7 +195,7 @@ func (checker *isEFIActionEventChecker) Check(params []interface{}, names []stri
 
 type efienvSuite struct{}
 
-var _ = Suite(&efienvSuite{})
+var _ = check.Suite(&efienvSuite{})
 
 type testNewEnvironmentData struct {
 	path                  string
@@ -198,16 +203,16 @@ type testNewEnvironmentData struct {
 	omitsReadyToBootEvent bool
 }
 
-func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
+func (s *efienvSuite) testNewEnvironment(c *check.C, data *testNewEnvironmentData) {
 	f, err := os.Open(data.path)
-	c.Assert(err, IsNil)
+	c.Assert(err, check.IsNil)
 
-	var config Config
+	var config efienv.Config
 	dec := json.NewDecoder(f)
-	c.Check(dec.Decode(&config), IsNil)
-	c.Check(f.Close(), IsNil)
+	c.Check(dec.Decode(&config), check.IsNil)
+	c.Check(f.Close(), check.IsNil)
 
-	env := NewEnvironment(&config, data.logAlgs)
+	env := efienv.NewEnvironment(&config, data.logAlgs)
 
 	for _, v := range []struct {
 		guid efi.GUID
@@ -231,25 +236,25 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 		},
 	} {
 		data, attrs, err := env.ReadVar(v.name, v.guid)
-		c.Check(err, IsNil)
-		c.Check(attrs, Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
+		c.Check(err, check.IsNil)
+		c.Check(attrs, check.Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 
 		expected, err := ioutil.ReadFile(filepath.Join("testdata", v.name))
-		c.Check(err, IsNil)
-		c.Check(data, DeepEquals, expected)
+		c.Check(err, check.IsNil)
+		c.Check(data, check.DeepEquals, expected)
 	}
 
 	log, err := env.ReadEventLog()
-	c.Assert(err, IsNil)
-	c.Check(log.Spec.IsEFI_2(), Equals, true)
-	c.Check(log.Algorithms, DeepEquals, data.logAlgs)
+	c.Assert(err, check.IsNil)
+	c.Check(log.Spec.IsEFI_2(), check.Equals, true)
+	c.Check(log.Algorithms, check.DeepEquals, data.logAlgs)
 
 	totalEvents := 8
 	if data.omitsReadyToBootEvent {
-		totalEvents -= 1
+		totalEvents--
 	}
 
-	c.Assert(log.Events, HasLen, totalEvents)
+	c.Assert(log.Events, check.HasLen, totalEvents)
 	c.Check(log.Events[0], isEFIVariableDriverConfigEvent, 7, "SecureBoot", efi.GlobalVariable, []byte{0x01})
 	c.Check(log.Events[1], isEFIVariableDriverConfigEvent, 7, "PK", efi.GlobalVariable, []byte(nil))
 	c.Check(log.Events[2], isEFIVariableDriverConfigEvent, 7, "KEK", efi.GlobalVariable, []byte(nil))
@@ -264,7 +269,7 @@ func (s *efienvSuite) testNewEnvironment(c *C, data *testNewEnvironmentData) {
 	}
 }
 
-func (s *efienvSuite) TestNewEnvironment1(c *C) {
+func (s *efienvSuite) TestNewEnvironment1(c *check.C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi.json",
 		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256},
@@ -272,7 +277,7 @@ func (s *efienvSuite) TestNewEnvironment1(c *C) {
 	})
 }
 
-func (s *efienvSuite) TestNewEnvironment2(c *C) {
+func (s *efienvSuite) TestNewEnvironment2(c *check.C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi-omits-rtb-event.json",
 		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA256},
@@ -280,7 +285,7 @@ func (s *efienvSuite) TestNewEnvironment2(c *C) {
 	})
 }
 
-func (s *efienvSuite) TestNewEnvironment3(c *C) {
+func (s *efienvSuite) TestNewEnvironment3(c *check.C) {
 	s.testNewEnvironment(c, &testNewEnvironmentData{
 		path:                  "testdata/uefi.json",
 		logAlgs:               tcglog.AlgorithmIdList{tpm2.HashAlgorithmSHA1, tpm2.HashAlgorithmSHA256},
