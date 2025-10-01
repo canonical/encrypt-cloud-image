@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/snapcore/snapd/osutil"
@@ -41,6 +42,19 @@ const (
 var (
 	keySize = 64
 )
+
+// IsFipsMode checks if the system is running in FIPS mode by examining
+// the /proc/sys/crypto/fips_enabled file. This file exists on Linux systems
+// and contains '1' when FIPS mode is enabled.
+func IsFipsMode() bool {
+	data, err := os.ReadFile("/proc/sys/crypto/fips_enabled")
+	if err != nil {
+		// If the file doesn't exist or can't be read, assume FIPS is not enabled
+		return false
+	}
+
+	return strings.TrimSpace(string(data)) == "1"
+}
 
 // cryptsetupCmd is a helper for running the cryptsetup command. If stdin is supplied, data read
 // from it is supplied to cryptsetup via its stdin. If callback is supplied, it will be invoked
@@ -100,25 +114,39 @@ type KDFOptions struct {
 }
 
 func (options *KDFOptions) appendArguments(args []string) []string {
-	// use argon2i as the KDF
-	args = append(args, "--pbkdf", "argon2i")
+	// Use FIPS-compatible parameters when FIPS mode is detected
+	if IsFipsMode() {
+		// use PBKDF2 as the KDF (FIPS compatible)
+		args = append(args, "--pbkdf", "pbkdf2")
 
-	switch {
-	case options.ForceIterations != 0:
-		// Disable benchmarking by forcing the time cost
-		args = append(args,
-			"--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
-	case options.TargetDuration != 0:
-		args = append(args,
-			"--iter-time", strconv.FormatInt(int64(options.TargetDuration/time.Millisecond), 10))
-	}
+		// Set appropriate PBKDF2 parameters for FIPS mode
+		if options.ForceIterations != 0 {
+			args = append(args, "--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
+		} else {
+			// Use a reasonable default iteration count for FIPS mode
+			args = append(args, "--pbkdf-force-iterations", "1000")
+		}
+	} else {
+		// use argon2i as the KDF (default for non-FIPS)
+		args = append(args, "--pbkdf", "argon2i")
 
-	if options.MemoryKiB != 0 {
-		args = append(args, "--pbkdf-memory", strconv.Itoa(options.MemoryKiB))
-	}
+		switch {
+		case options.ForceIterations != 0:
+			// Disable benchmarking by forcing the time cost
+			args = append(args,
+				"--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
+		case options.TargetDuration != 0:
+			args = append(args,
+				"--iter-time", strconv.FormatInt(int64(options.TargetDuration/time.Millisecond), 10))
+		}
 
-	if options.Parallel != 0 {
-		args = append(args, "--pbkdf-parallel", strconv.Itoa(options.Parallel))
+		if options.MemoryKiB != 0 {
+			args = append(args, "--pbkdf-memory", strconv.Itoa(options.MemoryKiB))
+		}
+
+		if options.Parallel != 0 {
+			args = append(args, "--pbkdf-parallel", strconv.Itoa(options.Parallel))
+		}
 	}
 
 	return args

@@ -84,7 +84,7 @@ func getBlockDeviceSize(path string) (int64, error) {
 }
 
 func luks2Encrypt(path string, key []byte) error {
-	cmd := internal_exec.LoggedCommand("cryptsetup",
+	args := []string{
 		// verbose
 		"-v",
 		// batch processing, no password verification for formatting an existing LUKS container
@@ -97,10 +97,22 @@ func luks2Encrypt(path string, key []byte) error {
 		"--key-file", "-",
 		// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
 		"--cipher", "aes-xts-plain64", "--key-size", "512",
-		// use argon2i as the KDF
-		"--pbkdf", "argon2i",
+	}
+
+	// Use FIPS-compatible parameters when FIPS mode is detected
+	if luks2.IsFipsMode() {
+		// use PBKDF2 as the KDF (FIPS compatible)
+		args = append(args, "--pbkdf", "pbkdf2")
+		// set FIPS-compatible iteration count
+		args = append(args, "--pbkdf-force-iterations", "1000")
+	} else {
+		// use argon2i as the KDF (default for non-FIPS)
+		args = append(args, "--pbkdf", "argon2i")
 		// set the minimum KDF cost parameters
-		"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
+		args = append(args, "--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768")
+	}
+
+	args = append(args,
 		// set the default metadata size to 512KiB
 		"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
 		// specify the keyslots area size of 16MiB - (2 * 512KiB)
@@ -108,6 +120,8 @@ func luks2Encrypt(path string, key []byte) error {
 		// reduce the device size by 2 * the header size, as required by cryptsetup
 		"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
 		path)
+
+	cmd := internal_exec.LoggedCommand("cryptsetup", args...)
 	cmd.Stdin = bytes.NewReader(key)
 
 	return cmd.Run()
