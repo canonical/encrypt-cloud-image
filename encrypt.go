@@ -104,7 +104,7 @@ func luks2Encrypt(path string, key []byte) error {
 		// use PBKDF2 as the KDF (FIPS compatible)
 		args = append(args, "--pbkdf", "pbkdf2")
 		// set FIPS-compatible iteration count
-		args = append(args, "--pbkdf-force-iterations", "1000")
+		args = append(args, "--pbkdf-force-iterations", "4")
 	} else {
 		// use argon2i as the KDF (default for non-FIPS)
 		args = append(args, "--pbkdf", "argon2i")

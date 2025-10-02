@@ -124,7 +124,7 @@ func (options *KDFOptions) appendArguments(args []string) []string {
 			args = append(args, "--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
 		} else {
 			// Use a reasonable default iteration count for FIPS mode
-			args = append(args, "--pbkdf-force-iterations", "1000")
+			args = append(args, "--pbkdf-force-iterations", "4")
 		}
 	} else {
 		// use argon2i as the KDF (default for non-FIPS)
