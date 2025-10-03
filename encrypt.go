@@ -97,10 +97,6 @@ func luks2Encrypt(path string, key []byte) error {
 		"--key-file", "-",
 		// use AES-256 with XTS block cipher mode (XTS requires 2 keys)
 		"--cipher", "aes-xts-plain64", "--key-size", "512",
-		// use argon2i as the KDF
-		"--pbkdf", "argon2i",
-		// set the minimum KDF cost parameters
-		"--pbkdf-force-iterations", "4", "--pbkdf-memory", "32768",
 		// set the default metadata size to 512KiB
 		"--luks2-metadata-size", fmt.Sprintf("%dk", luks2MetadataKiBSize),
 		// specify the keyslots area size of 16MiB - (2 * 512KiB)
@@ -110,6 +106,7 @@ func luks2Encrypt(path string, key []byte) error {
 		path)
 	cmd.Stdin = bytes.NewReader(key)
 
+	log.Infoln("running cmd:", cmd.String())
 	return cmd.Run()
 }
 
@@ -393,8 +390,8 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 	if !e.opts.GrowRoot {
 		opts := luks2.AddKeyOptions{
 			KDFOptions: luks2.KDFOptions{
-				MemoryKiB:       32 * 1024,
-				ForceIterations: 4},
+				KDFType:         "pbkdf2",
+				ForceIterations: 1000}, // 1000 is minimum required for pbkdf2
 			Slot: luks2GrowPartKeyslot}
 		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &opts); err != nil {
 			return fmt.Errorf("cannot add key to container for cc_growpart: %w", err)
