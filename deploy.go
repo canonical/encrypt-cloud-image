@@ -112,9 +112,14 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 		return errors.New("recovery key must be 16 bytes")
 	}
 
-	var recoveryKey secboot.RecoveryKey
-	copy(recoveryKey[:], b)
-	return secboot.AddRecoveryKeyToLUKS2Container(d.rootDevPath(), key, recoveryKey, nil)
+	// Use our internal LUKS2 module with PBKDF2 instead of secboot's function
+	opts := luks2.AddKeyOptions{
+		KDFOptions: luks2.KDFOptions{
+			KDFType:         "pbkdf2",
+			ForceIterations: 1000}, // Use PBKDF2 with 1000 iterations for FIPS compliance
+		Slot: luks2.AnySlot} // Let cryptsetup choose an appropriate slot
+	
+	return luks2.AddKey(d.rootDevPath(), key, b, &opts)
 }
 
 func (d *imageDeployer) maybeWriteCustomSRKTemplate(esp string, srkPub *tpm2.Public) error {
