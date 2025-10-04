@@ -34,7 +34,6 @@ import (
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
-	"github.com/snapcore/secboot"
 	secboot_efi "github.com/snapcore/secboot/efi"
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
 
@@ -112,9 +111,14 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 		return errors.New("recovery key must be 16 bytes")
 	}
 
-	var recoveryKey secboot.RecoveryKey
-	copy(recoveryKey[:], b)
-	return secboot.AddRecoveryKeyToLUKS2Container(d.rootDevPath(), key, recoveryKey, nil)
+	// Use internal LUKS2 module with PBKDF2
+	opts := luks2.AddKeyOptions{
+		KDFOptions: luks2.KDFOptions{
+			KDFType:         "pbkdf2",
+			ForceIterations: 1000},
+		Slot: luks2.AnySlot}
+	
+	return luks2.AddKey(d.rootDevPath(), key, b, &opts)
 }
 
 func (d *imageDeployer) maybeWriteCustomSRKTemplate(esp string, srkPub *tpm2.Public) error {
