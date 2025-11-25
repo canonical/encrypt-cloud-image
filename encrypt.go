@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -328,7 +327,7 @@ datasource_list: [ %s ]
 `
 		datasourceContent := fmt.Sprintf(datasourceOverrideTmpl, e.opts.OverrideDatasources)
 
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(cloudCfgDir, "99_datasources_override.cfg"), []byte(datasourceContent), 0644); err != nil {
 			return fmt.Errorf("cannot create datasource override file: %w", err)
 		}
 	}
@@ -341,7 +340,7 @@ growpart:
     mode: off
 `
 
-		if err := ioutil.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(cloudCfgDir, "99_disable_growpart.cfg"), []byte(disableGrowPart), 0644); err != nil {
 			return fmt.Errorf("cannot create growpart override file: %w", err)
 		}
 	} else {
@@ -355,7 +354,7 @@ growpart:
 			return fmt.Errorf("cannot marshal key data for growpart: %w", err)
 		}
 
-		if err := ioutil.WriteFile(filepath.Join(path, "cc_growpart_keydata"), b, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(path, "cc_growpart_keydata"), b, 0600); err != nil {
 			return fmt.Errorf("cannot write key data for growpart: %w", err)
 		}
 	}

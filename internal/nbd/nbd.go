@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,7 +59,7 @@ const (
 )
 
 func getMaxNBDs() (int, error) {
-	b, err := ioutil.ReadFile(filepath.Join(sysfsPath, "module/nbd/parameters/nbds_max"))
+	b, err := os.ReadFile(filepath.Join(sysfsPath, "module/nbd/parameters/nbds_max"))
 	if err != nil {
 		return 0, err
 	}
@@ -180,7 +179,7 @@ func (d nbdDev) sysfsPath() string {
 }
 
 func (d nbdDev) isManagedByProcess(pid int) (bool, error) {
-	b, err := ioutil.ReadFile(filepath.Join(d.sysfsPath(), "pid"))
+	b, err := os.ReadFile(filepath.Join(d.sysfsPath(), "pid"))
 	switch {
 	case os.IsNotExist(err):
 		return false, nil
