@@ -33,7 +33,6 @@ import (
 	"github.com/canonical/go-tpm2/mu"
 	"github.com/canonical/tcglog-parser"
 	log "github.com/sirupsen/logrus"
-	"github.com/snapcore/secboot"
 	secboot_efi "github.com/snapcore/secboot/efi"
 	secboot_tpm2 "github.com/snapcore/secboot/tpm2"
 
@@ -111,9 +110,7 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 		return errors.New("recovery key must be 16 bytes")
 	}
 
-	var recoveryKey secboot.RecoveryKey
-	copy(recoveryKey[:], b)
-	return secboot.AddRecoveryKeyToLUKS2Container(d.rootDevPath(), key, recoveryKey, nil)
+	return luks2.AddKey(d.rootDevPath(), key, b, nil)
 }
 
 func (d *imageDeployer) maybeWriteCustomSRKTemplate(esp string, srkPub *tpm2.Public) error {
@@ -186,6 +183,17 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 	log.Infoln("computing PCR protection profile")
 	pcrProfile := secboot_tpm2.NewPCRProtectionProfile()
 
+	var options []secboot_efi.PCRProfileOption
+	if env != nil {
+		options = append(options, secboot_efi.WithHostEnvironment(env))
+	}
+	if d.opts.AddEFIBootManagerProfile {
+		options = append(options, secboot_efi.WithBootManagerCodeProfile())
+	}
+	if d.opts.AddEFISecureBootProfile {
+		options = append(options, secboot_efi.WithSecureBootPolicyProfile())
+	}
+
 	// This function assumes that the boot architecture is Azure FDE (no grub)
 	kernelPaths, err := filepath.Glob(filepath.Join(esp, "EFI/ubuntu/kernel.efi-*"))
 	if err != nil {
@@ -196,43 +204,27 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		kernelPaths = append(kernelPaths, filepath.Join(esp, "EFI/ubuntu/grubx64.efi"))
 	}
 
-	var kernels []*secboot_efi.ImageLoadEvent
+	var kernels []secboot_efi.ImageLoadActivity
 	for _, path := range kernelPaths {
 		log.Debugln("found kernel", path)
-		kernels = append(kernels, &secboot_efi.ImageLoadEvent{
-			Source: secboot_efi.Shim,
-			Image:  secboot_efi.FileImage(path)})
+		kernels = append(kernels, secboot_efi.NewImageLoadActivity(secboot_efi.FileImage(path)))
 	}
 
-	loadSequences := &secboot_efi.ImageLoadEvent{
-		Source: secboot_efi.Firmware,
-		Image:  secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi")),
-		Next:   kernels}
+	loadSeqs := secboot_efi.NewImageLoadSequences()
+	loadSeqs.Append(secboot_efi.NewImageLoadActivity(
+		secboot_efi.FileImage(filepath.Join(esp, "EFI/ubuntu/shimx64.efi"))).Loads(kernels...))
 
-	if d.opts.AddEFIBootManagerProfile {
-		log.Debugln("adding boot manager PCR profile")
-		params := secboot_efi.BootManagerProfileParams{
-			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
-			Environment:   env}
-		if err := secboot_efi.AddBootManagerProfile(pcrProfile, &params); err != nil {
-			return nil, fmt.Errorf("cannot add EFI boot manager profile: %w", err)
-		}
-	}
-
-	if d.opts.AddEFISecureBootProfile {
-		log.Debugln("adding secure boot policy PCR profile")
-		params := secboot_efi.SecureBootPolicyProfileParams{
-			PCRAlgorithm:  tpm2.HashAlgorithmSHA256,
-			LoadSequences: []*secboot_efi.ImageLoadEvent{loadSequences},
-			Environment:   env}
-		if err := secboot_efi.AddSecureBootPolicyProfile(pcrProfile, &params); err != nil {
-			return nil, fmt.Errorf("cannot add EFI secure boot policy profile: %w", err)
-		}
+	if err := secboot_efi.AddPCRProfile(
+		tpm2.HashAlgorithmSHA256,
+		pcrProfile.RootBranch(),
+		loadSeqs,
+		options...,
+	); err != nil {
+		return nil, fmt.Errorf("cannot add PCR profile: %w", err)
 	}
 
 	if d.opts.AddUbuntuKernelProfile {
-		pcrProfile.AddPCRValue(tpm2.HashAlgorithmSHA256, 12, make([]byte, tpm2.HashAlgorithmSHA256.Size()))
+		pcrProfile.RootBranch().AddPCRValue(tpm2.HashAlgorithmSHA256, 12, make([]byte, tpm2.HashAlgorithmSHA256.Size()))
 
 		// Note, kernel EFI stub only measures a commandline if one is supplied
 		// TODO: Add kernel commandline
@@ -243,7 +235,7 @@ func (d *imageDeployer) computePCRProtectionProfile(esp string, env secboot_efi.
 		if err := binary.Write(h, binary.LittleEndian, uint32(0)); err != nil {
 			return nil, err
 		}
-		pcrProfile.ExtendPCR(tpm2.HashAlgorithmSHA256, 12, h.Sum(nil))
+		pcrProfile.RootBranch().ExtendPCR(tpm2.HashAlgorithmSHA256, 12, h.Sum(nil))
 	}
 
 	log.Debugln("PCR profile:", pcrProfile)
@@ -405,10 +397,7 @@ func (d *imageDeployer) deployImageOnDevice() error {
 	if err != nil {
 		return fmt.Errorf("cannot read SRK public area: %w", err)
 	}
-	srkName, err := srkPub.Name()
-	if err != nil {
-		return fmt.Errorf("cannot compute name of SRK: %w", err)
-	}
+	srkName := srkPub.Name()
 	log.Infof("supplied SRK name: %x\n", srkName)
 
 	keyDir := filepath.Join(espPath, "device/fde")

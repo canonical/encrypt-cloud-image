@@ -20,6 +20,7 @@
 package efienv_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -70,7 +71,7 @@ func (s *azSuite) testNewEnvironmentFromAzDiskProfile(c *check.C) {
 			"dbx",
 		},
 	} {
-		data, attrs, err := env.ReadVar(v.name, v.guid)
+		data, attrs, err := efi.ReadVariable(env.VarContext(context.Background()), v.name, v.guid)
 		c.Check(err, check.IsNil)
 		c.Check(attrs, check.Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 

@@ -20,7 +20,10 @@
 package efienv
 
 import (
+	"context"
+
 	efi "github.com/canonical/go-efilib"
+	"github.com/canonical/go-tpm2"
 	"github.com/canonical/tcglog-parser"
 	secboot_efi "github.com/snapcore/secboot/efi"
 )
@@ -38,7 +41,7 @@ type env struct {
 	logAlgorithms tcglog.AlgorithmIdList
 }
 
-func (e *env) makeEFIVariableDriverConfigEvent(pcr tcglog.PCRIndex, name string, guid efi.GUID, data []byte) *tcglog.Event {
+func (e *env) makeEFIVariableDriverConfigEvent(pcr tpm2.Handle, name string, guid efi.GUID, data []byte) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
 	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeEFIVariableDataDigest(alg.GetHash(), name, guid, data)
@@ -54,7 +57,7 @@ func (e *env) makeEFIVariableDriverConfigEvent(pcr tcglog.PCRIndex, name string,
 			VariableData: data}}
 }
 
-func (e *env) makeSeparatorEvent(pcr tcglog.PCRIndex) *tcglog.Event {
+func (e *env) makeSeparatorEvent(pcr tpm2.Handle) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
 	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeSeparatorEventDigest(alg.GetHash(), tcglog.SeparatorEventNormalValue)
@@ -67,7 +70,7 @@ func (e *env) makeSeparatorEvent(pcr tcglog.PCRIndex) *tcglog.Event {
 		Data:      new(tcglog.SeparatorEventData)}
 }
 
-func (e *env) makeEFIActionEvent(pcr tcglog.PCRIndex, data tcglog.EventData) *tcglog.Event {
+func (e *env) makeEFIActionEvent(pcr tpm2.Handle, data tcglog.EventData) *tcglog.Event {
 	digests := make(tcglog.DigestMap)
 	for _, alg := range e.logAlgorithms {
 		digests[alg] = tcglog.ComputeStringEventDigest(alg.GetHash(), data.String())
@@ -80,30 +83,54 @@ func (e *env) makeEFIActionEvent(pcr tcglog.PCRIndex, data tcglog.EventData) *tc
 		Data:      data}
 }
 
-func (e *env) ReadVar(name string, guid efi.GUID) ([]byte, efi.VariableAttributes, error) {
-	authVarPayload := func(data []byte) ([]byte, efi.VariableAttributes, error) {
-		return data, efi.AttributeTimeBasedAuthenticatedWriteAccess | efi.AttributeRuntimeAccess | efi.AttributeBootserviceAccess | efi.AttributeNonVolatile, nil
+type varsBackend struct {
+	*Config
+}
+
+func (b varsBackend) Get(name string, guid efi.GUID) (efi.VariableAttributes, []byte, error) {
+	authVarPayload := func(data []byte) (efi.VariableAttributes, []byte, error) {
+		return efi.AttributeTimeBasedAuthenticatedWriteAccess | efi.AttributeRuntimeAccess |
+			efi.AttributeBootserviceAccess | efi.AttributeNonVolatile, data, nil
 	}
 
 	switch guid {
 	case efi.GlobalVariable:
 		switch name {
 		case "PK":
-			return authVarPayload(e.PK)
+			return authVarPayload(b.PK)
 		case "KEK":
-			return authVarPayload(e.KEK)
+			return authVarPayload(b.KEK)
 		}
 	case efi.ImageSecurityDatabaseGuid:
 		switch name {
 		case "db":
-			return authVarPayload(e.Db)
+			return authVarPayload(b.Db)
 		case "dbx":
-			return authVarPayload(e.Dbx)
+			return authVarPayload(b.Dbx)
 		}
 	}
 
-	return nil, 0, efi.ErrVarNotExist
+	return 0, nil, efi.ErrVarNotExist
 }
+
+func (b varsBackend) List() ([]efi.VariableDescriptor, error) {
+	return []efi.VariableDescriptor{
+		{Name: "PK", GUID: efi.GlobalVariable},
+		{Name: "KEK", GUID: efi.GlobalVariable},
+		{Name: "db", GUID: efi.ImageSecurityDatabaseGuid},
+		{Name: "dbx", GUID: efi.ImageSecurityDatabaseGuid},
+	}, nil
+}
+
+// This is required to satisfy the efi.VarsBackend interface but is otherwise unused.
+func (b varsBackend) Set(_ string, _ efi.GUID, _ efi.VariableAttributes, _ []byte) error {
+	panic("unimplemented")
+}
+
+// This is left here to enforce that the varsBackend type satisfies the efi.VarsBackend interface.
+// The vars backends is passed via opaque context attribute and non-compliance with its interface wouldn't be caught
+// at compile time otherwise.
+var _ efi.VarsBackend = varsBackend{}
 
 func (e *env) ReadEventLog() (*tcglog.Log, error) {
 	log := &tcglog.Log{Spec: tcglog.Spec{PlatformType: tcglog.PlatformTypeEFI, Major: 2}, Algorithms: e.logAlgorithms}
@@ -121,6 +148,10 @@ func (e *env) ReadEventLog() (*tcglog.Log, error) {
 	log.Events = append(log.Events, e.makeSeparatorEvent(4))
 
 	return log, nil
+}
+
+func (e *env) VarContext(parent context.Context) context.Context {
+	return context.WithValue(parent, efi.VarsBackendKey{}, varsBackend{e.Config})
 }
 
 func NewEnvironment(config *Config, logAlgorithms tcglog.AlgorithmIdList) secboot_efi.HostEnvironment {

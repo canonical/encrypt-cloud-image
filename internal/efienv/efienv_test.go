@@ -21,6 +21,7 @@ package efienv_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -64,7 +65,7 @@ func (checker *isEFIVariableDriverConfigEventChecker) Check(params []interface{}
 	if !ok {
 		return false, names[1] + "is not a PCR index"
 	}
-	if tcglog.PCRIndex(pcr) != e.PCRIndex {
+	if tpm2.Handle(pcr) != e.PCRIndex {
 		return false, invalidPCRIndexErrStr
 	}
 
@@ -124,7 +125,7 @@ func (checker *isSeparatorEventChecker) Check(params []interface{}, names []stri
 	if !ok {
 		return false, names[1] + "is not a PCR index"
 	}
-	if tcglog.PCRIndex(pcr) != e.PCRIndex {
+	if tpm2.Handle(pcr) != e.PCRIndex {
 		return false, invalidPCRIndexErrStr
 	}
 
@@ -174,7 +175,7 @@ func (checker *isEFIActionEventChecker) Check(params []interface{}, names []stri
 	if !ok {
 		return false, names[1] + "is not a PCR index"
 	}
-	if tcglog.PCRIndex(pcr) != e.PCRIndex {
+	if tpm2.Handle(pcr) != e.PCRIndex {
 		return false, invalidPCRIndexErrStr
 	}
 
@@ -234,7 +235,7 @@ func (s *efienvSuite) testNewEnvironment(c *check.C, data *testNewEnvironmentDat
 			"dbx",
 		},
 	} {
-		data, attrs, err := env.ReadVar(v.name, v.guid)
+		data, attrs, err := efi.ReadVariable(env.VarContext(context.Background()), v.name, v.guid)
 		c.Check(err, check.IsNil)
 		c.Check(attrs, check.Equals, efi.AttributeTimeBasedAuthenticatedWriteAccess|efi.AttributeRuntimeAccess|efi.AttributeBootserviceAccess|efi.AttributeNonVolatile)
 
