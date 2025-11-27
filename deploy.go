@@ -110,7 +110,13 @@ func (d *imageDeployer) maybeAddRecoveryKey(key []byte) error {
 		return errors.New("recovery key must be 16 bytes")
 	}
 
-	return luks2.AddKey(d.rootDevPath(), key, b, nil)
+	opts := luks2.AddKeyOptions{
+		KDFOptions: luks2.KDFOptions{
+			ForceIterations: minimumPBKDF2Iterations,
+		},
+		Slot: luks2.AnySlot,
+	}
+	return luks2.AddKey(d.rootDevPath(), key, b, &opts)
 }
 
 func (d *imageDeployer) maybeWriteCustomSRKTemplate(esp string, srkPub *tpm2.Public) error {
