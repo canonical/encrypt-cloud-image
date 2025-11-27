@@ -27,7 +27,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"time"
 
 	"github.com/snapcore/snapd/osutil"
 )
@@ -74,51 +73,17 @@ func cryptsetupCmd(stdin io.Reader, callback func(cmd *exec.Cmd) error, args ...
 	return nil
 }
 
-// KDFOptions specifies parameters for the Argon2 KDF.
+// KDFOptions specifies parameters for PBKDF2.
 type KDFOptions struct {
-	// TargetDuration specifies the target time for benchmarking of the
-	// time and memory cost parameters. If it is zero then the cryptsetup
-	// default is used. If ForceIterations is not zero then this is ignored.
-	TargetDuration time.Duration
-
-	// MemoryKiB specifies the maximum memory cost in KiB when ForceIterations
-	// is zero, or the actual memory cost in KiB when ForceIterations is not zero.
-	// If this is set to zero, then the cryptsetup default is used.
-	MemoryKiB int
-
-	// ForceIterations specifies the time cost. If set to zero, the time
-	// and memory cost are determined by benchmarking the algorithm based on
-	// the specified TargetDuration. Set to a non-zero number to force the
-	// time cost to the value of this field, and the memory cost to the value
-	// of MemoryKiB, disabling benchmarking.
+	// ForceIterations specifies the iteration count.
 	ForceIterations int
-
-	// Parallel sets the maximum number of parallel threads. Cryptsetup may
-	// choose a lower value based on its own maximum and the number of available
-	// CPU cores.
-	Parallel int
 }
 
 func (options *KDFOptions) appendArguments(args []string) []string {
-	// use argon2i as the KDF
-	args = append(args, "--pbkdf", "argon2i")
+	args = append(args, "--pbkdf", "pbkdf2")
 
-	switch {
-	case options.ForceIterations != 0:
-		// Disable benchmarking by forcing the time cost
-		args = append(args,
-			"--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
-	case options.TargetDuration != 0:
-		args = append(args,
-			"--iter-time", strconv.FormatInt(int64(options.TargetDuration/time.Millisecond), 10))
-	}
-
-	if options.MemoryKiB != 0 {
-		args = append(args, "--pbkdf-memory", strconv.Itoa(options.MemoryKiB))
-	}
-
-	if options.Parallel != 0 {
-		args = append(args, "--pbkdf-parallel", strconv.Itoa(options.Parallel))
+	if options.ForceIterations > 0 {
+		args = append(args, "--pbkdf-force-iterations", strconv.Itoa(options.ForceIterations))
 	}
 
 	return args
@@ -148,7 +113,7 @@ type FormatOptions struct {
 // called on a device that is not mapped.
 //
 // The container will be configured to encrypt data with AES-256 and XTS block cipher mode. The
-// KDF for the primary keyslot will be configured to use argon2i with the supplied benchmark time.
+// KDF for the primary keyslot will be PBKDF2 with the provided iteration count.
 //
 // WARNING: This function is destructive. Calling this on an existing LUKS2 container will make the
 // data contained inside of it irretrievable.
@@ -201,12 +166,11 @@ type AddKeyOptions struct {
 	Slot int
 }
 
-// AddKey adds the supplied key in to a new keyslot for specified LUKS2 container. In order to do this,
-// an existing key must be provided. The KDF for the new keyslot will be configured to use argon2i with
-// the supplied benchmark time. The key will be added to the supplied slot.
+// AddKey adds a key derived from a provided existing key to the provided key slot in the provided
+// LUKS2 container.
 //
-// If options is not supplied, the default KDF benchmark time is used and the command will
-// automatically choose an appropriate slot.
+// If options is not provided, the default key derivation iteration count will be used and key slot
+// selection will be delegated to cryptsetup.
 func AddKey(devicePath string, existingKey, key []byte, options *AddKeyOptions) error {
 	if options == nil {
 		options = &AddKeyOptions{Slot: AnySlot}
