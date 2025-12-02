@@ -25,7 +25,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -125,7 +124,7 @@ exec %[1]s -mock-udevadm-monitor %[2]s
 
 func (s *nbdSuite) mockNbdModule(c *check.C, n int) {
 	c.Check(os.MkdirAll(filepath.Join(s.sysfsPath, "module/nbd/parameters"), 0755), check.IsNil)
-	c.Check(ioutil.WriteFile(filepath.Join(s.sysfsPath, "module/nbd/parameters/nbds_max"), []byte(strconv.Itoa(n)), 0644), check.IsNil)
+	c.Check(os.WriteFile(filepath.Join(s.sysfsPath, "module/nbd/parameters/nbds_max"), []byte(strconv.Itoa(n)), 0644), check.IsNil)
 }
 
 func (s *nbdSuite) waitForQemuNbd(path string, iter int) (int, error) {
@@ -197,7 +196,7 @@ func (s *nbdSuite) mockNbdConnection(path string, pid int) error {
 	if err := os.MkdirAll(sysfsPath, 0755); err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filepath.Join(sysfsPath, "pid"), []byte(strconv.Itoa(pid)), 0444)
+	return os.WriteFile(filepath.Join(sysfsPath, "pid"), []byte(strconv.Itoa(pid)), 0444)
 }
 
 func (s *nbdSuite) simulateKernelUevent(action, path, subsystem string) error {
@@ -413,7 +412,7 @@ func runMockQemuNbd() int {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		fmt.Fprint(os.Stderr, err)
 		return 1

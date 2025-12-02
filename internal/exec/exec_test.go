@@ -24,7 +24,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -134,7 +133,7 @@ func (s *execSuite) SetUpSuite(c *check.C) {
 	s.savedLevel = log.StandardLogger().Level
 	s.savedLogDest = log.StandardLogger().Out
 	log.SetLevel(log.DebugLevel)
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 
 	dir := c.MkDir()
 
@@ -349,7 +348,7 @@ func runChild() int {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		fmt.Fprint(os.Stderr, err)
 		return 1

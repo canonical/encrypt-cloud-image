@@ -22,7 +22,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,7 +176,7 @@ func (b *encryptCloudImageBase) exitScope() {
 }
 
 func (b *encryptCloudImageBase) setupWorkingDir(baseDir string) error {
-	name, err := ioutil.TempDir(baseDir, "encrypt-cloud-image.")
+	name, err := os.MkdirTemp(baseDir, "encrypt-cloud-image.")
 	if err != nil {
 		return fmt.Errorf("cannot setup working directory: %w", err)
 	}
@@ -331,7 +331,7 @@ func checkPrerequisites() error {
 }
 
 func configureLogging() {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 
 	w := logutil.NewFormattedWriter(
 		[]log.Level{

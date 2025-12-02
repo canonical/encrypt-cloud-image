@@ -21,7 +21,6 @@ package luks2
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -32,7 +31,7 @@ func mkFifo() (string, func(), error) {
 	// /run is not world writable but we create a unique directory here because this
 	// code can be invoked by a public API and we shouldn't fail if more than one
 	// process reaches here at the same time.
-	dir, err := ioutil.TempDir("/run", filepath.Base(os.Args[0])+".")
+	dir, err := os.MkdirTemp("/run", filepath.Base(os.Args[0])+".")
 	if err != nil {
 		return "", nil, fmt.Errorf("cannot create temporary directory: %w", err)
 	}

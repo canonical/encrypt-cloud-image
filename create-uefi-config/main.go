@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -71,7 +70,7 @@ func populateConfigFromVars(config *efienv.Config) error {
 			dest: &config.Dbx,
 		},
 	} {
-		b, _, err := efi.ReadVariable(v.name, v.guid)
+		b, _, err := efi.ReadVariable(efi.DefaultVarContext, v.name, v.guid)
 		if err != nil && err != efi.ErrVarNotExist {
 			return fmt.Errorf("cannot read %s variable: %w", v.name, err)
 		}
@@ -84,7 +83,7 @@ func populateConfigFromVars(config *efienv.Config) error {
 
 func populateConfigFromESLs(config *efienv.Config, path string) error {
 	pkPath := filepath.Join(path, "PK.esl")
-	pk, err := ioutil.ReadFile(pkPath)
+	pk, err := os.ReadFile(pkPath)
 	switch {
 	case err != nil && os.IsNotExist(err):
 	case err != nil:
@@ -196,7 +195,7 @@ func run(args []string) error {
 				src:  config.Dbx,
 			},
 		} {
-			if err := ioutil.WriteFile(filepath.Join(options.SaveDatabases, d.name), d.src, 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(options.SaveDatabases, d.name), d.src, 0644); err != nil {
 				return fmt.Errorf("cannot write file %s: %w", d.name, err)
 			}
 		}
