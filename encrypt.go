@@ -108,6 +108,10 @@ func luks2Encrypt(path string, key []byte) error {
 		"--luks2-keyslots-size", fmt.Sprintf("%dk", luks2HeaderKiBSize-(2*luks2MetadataKiBSize)),
 		// reduce the device size by 2 * the header size, as required by cryptsetup
 		"--reduce-device-size", fmt.Sprintf("%dk", 2*luks2HeaderKiBSize),
+		// Print progress details like estimated time remaining
+		"--progress-json",
+		// Print progress every 2 seconds
+		"--progress-frequency", fmt.Sprintf("%d", 2),
 		path)
 	cmd.Stdin = bytes.NewReader(key)
 
