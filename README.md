@@ -114,3 +114,14 @@ in order to override this using one of the following options:
   - `omitsReadyToBootEvent` [bool] - Whether the firmware omits the *Calling EFI Application From Boot Option* `EV_EFI_ACTION` event in PCR4.
 - `--az-disk-profile`: documentation *TODO*
 
+### Resuming in-progress encryption
+
+In the event that your system crashes during encryption, there is a chance of resuming the encryption rather than restarting from the beginning.
+Re-running `encrypt-cloud-image encrypt ...` with the same arguments will attempt to resume if possible.
+
+`encrypt-cloud-image` will write state to `<basename>.encrypt-state.json` where basename is the filename of your input image.
+This file will be written to your output directory if specified or to the current directory otherwise.
+This file is automatically cleaned up if the `encrypt`command completes.
+
+If you would like to restart rather than resume an in-progress encryption you can delete the `<basename>.encrypt-state.json` file.
+

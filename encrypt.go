@@ -23,6 +23,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -118,9 +120,96 @@ func luks2Encrypt(path string, key []byte) error {
 	return cmd.Run()
 }
 
+// luks2Repair repairs inconsistent LUKS2 reencryption metadata.
+// This is required when reencryption was interrupted in an inconsistent state.
+func luks2Repair(path string, key []byte) error {
+	cmd := internal_exec.LoggedCommand("cryptsetup",
+		// verbose
+		"-v",
+		// batch processing
+		"-q",
+		// repair the LUKS2 metadata
+		"repair",
+		// read the key from stdin
+		"--key-file", "-",
+		path)
+	cmd.Stdin = bytes.NewReader(key)
+
+	return cmd.Run()
+}
+
+// luks2EncryptResume resumes an in-progress LUKS2 encryption operation.
+func luks2EncryptResume(path string, key []byte) error {
+	cmd := internal_exec.LoggedCommand("cryptsetup",
+		// verbose
+		"-v",
+		// batch processing
+		"-q",
+		// resume an in-progress encryption
+		"reencrypt", "--resume-only",
+		// read the key from stdin
+		"--key-file", "-",
+		// Print progress details like estimated time remaining
+		"--progress-json",
+		// Print progress every 2 seconds
+		"--progress-frequency", fmt.Sprintf("%d", 2),
+		path)
+	cmd.Stdin = bytes.NewReader(key)
+
+	return cmd.Run()
+}
+
+// luks2EncryptResumeWithRepair attempts to resume encryption, and if that fails
+// due to inconsistent metadata, it repairs the device and retries the resume.
+func luks2EncryptResumeWithRepair(path string, key []byte) error {
+	err := luks2EncryptResume(path, key)
+	if err != nil {
+		log.Infoln("resume failed, attempting repair on", path)
+		if repairErr := luks2Repair(path, key); repairErr != nil {
+			return fmt.Errorf("cannot repair LUKS2 metadata: %w (original error: %v)", repairErr, err)
+		}
+
+		log.Infoln("repair completed, retrying resume on", path)
+		if err := luks2EncryptResume(path, key); err != nil {
+			return fmt.Errorf("cannot resume encryption after repair: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func luks2SetLabel(path, label string) error {
 	cmd := internal_exec.LoggedCommand("cryptsetup", "-v", "config", "--label", label, path)
 	return cmd.Run()
+}
+
+// isReencryptInProgress checks if a LUKS2 device has an in-progress reencryption operation
+func isReencryptInProgress(devicePath string) (bool, error) {
+	cmd := internal_exec.LoggedCommand("cryptsetup", "luksDump", "--dump-json-metadata", devicePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("cannot dump LUKS2 metadata: %w", err)
+	}
+
+	var metadata struct {
+		Config struct {
+			Requirements struct {
+				Mandatory []string `json:"mandatory"`
+			} `json:"requirements"`
+		} `json:"config"`
+	}
+
+	if err := json.Unmarshal(output, &metadata); err != nil {
+		return false, fmt.Errorf("cannot parse LUKS2 metadata JSON: %w", err)
+	}
+
+	for _, req := range metadata.Config.Requirements.Mandatory {
+		if strings.HasPrefix(req, "online-reencrypt") || strings.HasPrefix(req, "offline-reencrypt") {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func growExtFS(path string) error {
@@ -192,6 +281,185 @@ type imageEncrypter struct {
 
 	opts   *encryptOptions
 	failed bool
+
+	// isResuming indicates we're resuming an interrupted encryption
+	isResuming bool
+
+	// unlockKey is the encryption key (generated or loaded from state)
+	unlockKey []byte
+
+	// growPartKey is the key for cc_growpart (generated or loaded from state)
+	// nil when --grow-root is specified
+	growPartKey []byte
+}
+
+// encryptionState holds the state needed to resume an interrupted encryption
+type encryptionState struct {
+	// WorkingDir is the basename of the temporary working directory.
+	// The full path is reconstructed relative to the state file location.
+	WorkingDir string `json:"working_dir"`
+
+	// UnlockKey is the primary encryption key (base64 encoded)
+	UnlockKey string `json:"unlock_key"`
+
+	// GrowPartKey is the key for cc_growpart (base64 encoded)
+	// Empty when --grow-root is specified
+	GrowPartKey string `json:"growpart_key,omitempty"`
+}
+
+// Validate checks that all required fields in the encryptionState are set
+func (s *encryptionState) Validate() error {
+	if s.WorkingDir == "" {
+		return errors.New("working_dir is required in encryption state")
+	}
+	if s.UnlockKey == "" {
+		return errors.New("unlock_key is required in encryption state")
+	}
+	return nil
+}
+
+// stateFilePath returns the deterministic path for the state file
+func (e *imageEncrypter) stateFilePath() string {
+	basename := filepath.Base(e.opts.Positional.Input)
+	stateFileName := basename + ".encrypt-state.json"
+
+	var baseDir string
+	if e.opts.Output != "" {
+		baseDir = filepath.Dir(e.opts.Output)
+	} else {
+		baseDir = "."
+	}
+
+	return filepath.Join(baseDir, stateFileName)
+}
+
+// loadState attempts to load existing state from the state file.
+// Returns nil if no state file exists.
+func (e *imageEncrypter) loadState() (*encryptionState, error) {
+	path := e.stateFilePath()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read state file: %w", err)
+	}
+
+	var state encryptionState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("cannot parse state file: %w", err)
+	}
+
+	if err := state.Validate(); err != nil {
+		return nil, fmt.Errorf("state validation failed: %w", err)
+	}
+
+	return &state, nil
+}
+
+// saveState writes the current state to the state file
+func (e *imageEncrypter) saveState() error {
+	state := encryptionState{
+		WorkingDir: filepath.Base(e.workingDirPath()),
+		UnlockKey:  base64.StdEncoding.EncodeToString(e.unlockKey),
+	}
+	if e.growPartKey != nil {
+		state.GrowPartKey = base64.StdEncoding.EncodeToString(e.growPartKey)
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("cannot marshal state: %w", err)
+	}
+
+	path := e.stateFilePath()
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("cannot write state file: %w", err)
+	}
+
+	log.Debugln("wrote state file to", path)
+	return nil
+}
+
+// deleteState removes the state file
+func (e *imageEncrypter) deleteState() error {
+	path := e.stateFilePath()
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("cannot remove state file: %w", err)
+	}
+	return nil
+}
+
+// checkOrCreateState checks for existing state (resume) or creates new state (default).
+// This must be called early in run() after input validation.
+func (e *imageEncrypter) checkOrCreateState() error {
+	state, err := e.loadState()
+	if err != nil {
+		return err
+	}
+
+	if state != nil {
+		// Resume scenario
+		log.Infoln("found existing state file - resuming encryption")
+		e.isResuming = true
+
+		// Reconstruct the full working directory path from the basename.
+		// The working dir is always in the same directory as the state file.
+		stateFileDir := filepath.Dir(e.stateFilePath())
+		e.workingDir = filepath.Join(stateFileDir, state.WorkingDir)
+
+		e.unlockKey, err = base64.StdEncoding.DecodeString(state.UnlockKey)
+		if err != nil {
+			return fmt.Errorf("cannot decode key from state: %w", err)
+		}
+
+		if state.GrowPartKey != "" {
+			e.growPartKey, err = base64.StdEncoding.DecodeString(state.GrowPartKey)
+			if err != nil {
+				return fmt.Errorf("cannot decode growpart key from state: %w", err)
+			}
+		}
+
+		// Verify working directory still exists
+		if _, err := os.Stat(e.workingDir); err != nil {
+			return fmt.Errorf("working directory from state no longer exists: %w", err)
+		}
+
+		e.addCleanup(func() error {
+			log.Debugln("removing", e.workingDir)
+			if err := os.RemoveAll(e.workingDir); err != nil {
+				return fmt.Errorf("cannot remove working directory: %w", err)
+			}
+			return nil
+		})
+
+		log.Debugln("resumed state: working dir =", e.workingDir)
+		return nil
+	}
+
+	log.Debugln("no state file found - no in-progress encryption to resume")
+
+	// For tpm import sensitive data should not be larger than block size (64)
+	// else we get TPM_RC_KEY_SIZE, so with two keys we need to keep key size at 16 each.
+	var key [16]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return fmt.Errorf("cannot generate primary key: %w", err)
+	}
+	e.unlockKey = key[:]
+
+	if !e.opts.GrowRoot {
+		var growKey [32]byte
+		if _, err := rand.Read(growKey[:]); err != nil {
+			return fmt.Errorf("cannot generate growpart key: %w", err)
+		}
+		e.growPartKey = growKey[:]
+	}
+
+	if err := e.setupWorkingDir(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (e *imageEncrypter) maybeCopyKernelToESP() error {
@@ -244,42 +512,42 @@ func (e *imageEncrypter) growRootPartition() error {
 	return nil
 }
 
-func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
+func (e *imageEncrypter) encryptRootPartition() error {
 	devPath := e.rootDevPath()
 
-	log.Infoln("shrinking fileystem on", devPath)
-	if err := shrinkExtFS(devPath); err != nil {
-		return nil, fmt.Errorf("cannot shrink filesystem: %w", err)
-	}
+	if e.isResuming {
+		log.Infoln("resuming encryption on", devPath)
+		if err := luks2EncryptResumeWithRepair(devPath, e.unlockKey); err != nil {
+			return fmt.Errorf("cannot resume encryption on %s: %w", devPath, err)
+		}
+	} else {
+		log.Infoln("shrinking fileystem on", devPath)
+		if err := shrinkExtFS(devPath); err != nil {
+			return fmt.Errorf("cannot shrink filesystem: %w", err)
+		}
 
-	// For tpm import sensitive data should not be larger than block size (64) else we get TPM_RC_KEY_SIZE
-	// so with two keys we need to keep key size at 16 each.
-	var key [16]byte
-	if _, err := rand.Read(key[:]); err != nil {
-		return nil, fmt.Errorf("cannot obtain primary unlock key: %w", err)
-	}
-
-	log.Infoln("encrypting", devPath)
-	if err := luks2Encrypt(devPath, key[:]); err != nil {
-		return nil, fmt.Errorf("cannot encrypt %s: %w", devPath, err)
+		log.Infoln("encrypting", devPath)
+		if err := luks2Encrypt(devPath, e.unlockKey); err != nil {
+			return fmt.Errorf("cannot encrypt %s: %w", devPath, err)
+		}
 	}
 
 	log.Infoln("setting label")
 	if err := luks2SetLabel(devPath, "cloudimg-rootfs-enc"); err != nil {
-		return nil, fmt.Errorf("cannot set label: %w", err)
+		return fmt.Errorf("cannot set label: %w", err)
 	}
 
 	token := &luks2.GenericToken{
 		TokenType:     luks2TokenType,
 		TokenKeyslots: []int{0},
 		Params: map[string]interface{}{
-			luks2TokenKey: key[:],
+			luks2TokenKey: e.unlockKey,
 		},
 	}
 
 	log.Infoln("importing cleartext token")
 	if err := luks2.ImportToken(devPath, token); err != nil {
-		return nil, fmt.Errorf("cannot import token into LUKS2 container: %w", err)
+		return fmt.Errorf("cannot import token into LUKS2 container: %w", err)
 	}
 
 	e.enterScope()
@@ -287,8 +555,8 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 
 	volumeName := filepath.Base(devPath)
 	log.Infoln("attaching encrypted container as", volumeName)
-	if err := luks2.Activate(volumeName, devPath, key[:]); err != nil {
-		return nil, fmt.Errorf("cannot activate LUKS container: %w", err)
+	if err := luks2.Activate(volumeName, devPath, e.unlockKey); err != nil {
+		return fmt.Errorf("cannot activate LUKS container: %w", err)
 	}
 	e.addCleanup(func() error {
 		log.Infoln("detaching", volumeName)
@@ -301,13 +569,13 @@ func (e *imageEncrypter) encryptRootPartition() ([]byte, error) {
 
 	log.Infoln("growing filesystem on", path)
 	if err := growExtFS(path); err != nil {
-		return nil, fmt.Errorf("cannot grow filesystem: %w", err)
+		return fmt.Errorf("cannot grow filesystem: %w", err)
 	}
 
-	return key[:], nil
+	return nil
 }
 
-func (e *imageEncrypter) customizeRootFS(growPartKey [32]byte) error {
+func (e *imageEncrypter) customizeRootFS() error {
 	log.Infoln("applying customizations to image")
 
 	e.enterScope()
@@ -353,7 +621,7 @@ growpart:
 		log.Debugln("writing key data for cloud-init cc_growpart")
 
 		data := growPartKeyData{
-			Key:  growPartKey[:],
+			Key:  e.growPartKey,
 			Slot: luks2GrowPartKeyslot}
 		b, err := json.Marshal(&data)
 		if err != nil {
@@ -379,19 +647,40 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 		return err
 	}
 
-	var growPartKey [32]byte
-	if !e.opts.GrowRoot {
-		if _, err := rand.Read(growPartKey[:]); err != nil {
-			return fmt.Errorf("cannot obtain key for cc_growpart: %w", err)
+	// If we're resuming, verify the device actually has in-progress encryption
+	if e.isResuming {
+		devPath := e.rootDevPath()
+		inProgress, err := isReencryptInProgress(devPath)
+		if err != nil {
+			return fmt.Errorf(
+				"cannot check encryption status on %s: %w. "+
+					"This likely means encryption was never started. "+
+					"Re-run encrypt-cloud-image to start fresh",
+				devPath, err)
+		}
+
+		if !inProgress {
+			return fmt.Errorf(
+				"state file exists but no in-progress encryption found on %s. "+
+					"Resume only supports interrupted encryption, not pre-encryption failures. "+
+					"Re-run encrypt-cloud-image to start fresh",
+				devPath)
+		}
+
+		log.Infoln("verified in-progress encryption on", devPath, "- resuming")
+	} else {
+		if err := e.customizeRootFS(); err != nil {
+			return fmt.Errorf("cannot apply customizations to root filesystem: %w", err)
 		}
 	}
 
-	if err := e.customizeRootFS(growPartKey); err != nil {
-		return fmt.Errorf("cannot apply customizations to root filesystem: %w", err)
+	// Saving state here to enable retries.
+	// We don't do this earlier because there are non-retryable steps prior to this point (image copy, rootfs customization)
+	if err := e.saveState(); err != nil {
+		return err
 	}
 
-	key, err := e.encryptRootPartition()
-	if err != nil {
+	if err := e.encryptRootPartition(); err != nil {
 		return fmt.Errorf("cannot encrypt root partition: %w", err)
 	}
 
@@ -400,7 +689,7 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 			KDFOptions: luks2.KDFOptions{
 				ForceIterations: minimumPBKDF2Iterations},
 			Slot: luks2GrowPartKeyslot}
-		if err := luks2.AddKey(e.rootDevPath(), key, growPartKey[:], &opts); err != nil {
+		if err := luks2.AddKey(e.rootDevPath(), e.unlockKey, e.growPartKey, &opts); err != nil {
 			return fmt.Errorf("cannot add key to container for cc_growpart: %w", err)
 		}
 	} else if err := e.growRootPartition(); err != nil {
@@ -415,6 +704,15 @@ func (e *imageEncrypter) encryptImageOnDevice() error {
 }
 
 func (e *imageEncrypter) prepareWorkingImage() (string, error) {
+	if e.isResuming {
+		path := filepath.Join(e.workingDirPath(), filepath.Base(e.opts.Output))
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("cannot find working image for resume at %s: %w", path, err)
+		}
+		log.Infoln("using existing working image at", path, "(resume)")
+		return path, nil
+	}
+
 	f, err := os.Open(e.opts.Positional.Input)
 	if err != nil {
 		return "", fmt.Errorf("cannot open source image: %w", err)
@@ -507,9 +805,6 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 		return errors.New("cannot specify --output with a block device")
 	}
 
-	if err := e.setupWorkingDir(); err != nil {
-		return err
-	}
 	rootPartitionUUIDOverride := opts.RootPartitionUUID != ""
 	espPartitionUUIDOverride := opts.ESPPartitionUUID != ""
 
@@ -520,6 +815,16 @@ func (e *imageEncrypter) run(opts *encryptOptions) error {
 	if rootPartitionUUIDOverride && fi.Mode()&os.ModeDevice == 0 {
 		return errors.New("overrides for partition detection are supported only when specifying block device")
 	}
+
+	if err := e.checkOrCreateState(); err != nil {
+		return err
+	}
+
+	// Always clean-up state file, it is only preserved on external crashes
+	// in order to enable resuming in-progress encryption
+	e.addCleanup(func() error {
+		return e.deleteState()
+	})
 
 	if fi.Mode()&os.ModeDevice != 0 {
 		// Input file is a block device
