@@ -30,7 +30,8 @@ prerequisites:
 
 ### 1. Setting up a vTPM and generating an SRK primary key
 
-Using swtpm this is an example invocation to get a software TPM up and running:
+Using swtpm this is an example invocation to get a software TPM up and running so that
+`tpm2-tools` can talk to it:
 
 ```bash
 mkdir /tmp/mytpm0
@@ -49,6 +50,23 @@ tpm2_createprimary -c srk.ctx
 tpm2_readpublic -c srk.ctx -o srk.pub
 ```
 
+Once `srk.pub` has been created, stop this swtpm instance (for example with {kbd}`Ctrl+C`).
+
+````{important}
+This `--server` form of swtpm is only meant for `tpm2-tools`. QEMU often fails to connect to it with
+`tpm-emulator: Failed to send CMD_SET_DATAFD: Success`. To boot the image, start swtpm with only a
+control socket instead, as shown in [](../tutorials/local-testing.md):
+
+```bash
+swtpm socket --ctrl type=unixio,path=/tmp/mytpm0/swtpm-sock.ctrl \
+             --tpmstate dir=/tmp/mytpm0 \
+             --tpm2
+```
+
+Always reuse the `/tmp/mytpm0` state directory, because the FDE key is sealed to the SRK stored in it.
+swtpm exits when QEMU exits, so it needs to be started again before each boot.
+````
+
 ### 2. Preparing the guest's UEFI configuration
 
 QEMU and OVMF is used for local testing. In order to create the guest's UEFI configuration:
@@ -59,55 +77,27 @@ QEMU and OVMF is used for local testing. In order to create the guest's UEFI con
 cp /usr/share/OVMF/OVMF_VARS_4M.ms.fd .
 ```
 
-- use `virt-fw-vars` to extract the certificates
+- boot a VM once with this copy, for example a stock Ubuntu cloud image, using the
+  `-drive if=pflash,format=raw,file=OVMF_VARS_4M.ms.fd` option. OVMF may update the Secure Boot
+  variables stored in the file on first boot (see
+  [LP: #2146560](https://bugs.launchpad.net/ubuntu/+source/edk2/+bug/2146560)), so the UEFI
+  configuration must be generated from the booted copy to match what is measured at boot.
+
+- generate `uefi-config.json` from the `PK`, `KEK`, `db` and `dbx` variables of the booted copy
 
 ```bash
-mkdir certs
-cd certs
-virt-fw-vars -i ../OVMF_VARS_4M.ms.fd --extract-certs
-cd ..
-```
-
-```{note}
-`--extract-certs` doesn't support extraction of EFI signature lists of type other than X509 and
-OVMF_VARS_4M.ms.fd also contains a dbx which contains an EFI signature list of type SHA256 which
-contains a SHA256 hash of an empty file. This needs to also be extracted separately:
-
-```bash
-# This is extracted using
-#
-# virt-fw-vars -i ../OVMF_VARS_4M.ms.fd --output-json vars.json
-#
-# then extracting the data field of the dbx variable to a separate file i.e dbx
-#
-# cat dbx | xxd -r -p | base64
-db="JhbEwUxQkkCsqUH5NpNDKEwAAAAAAAAAMAAAAKOouqAdBKhIvIfDbRIbXj3jsMRCmPwcFJr79MiZb7kkJ65B5GSbk0yklZkbeFK4VQ=="
-echo $db | base64 -d > certs/dbx-sha256-of-emptyfile.esl
-```
-
-- convert the pem certificates to EFI signature lists
-
-```{caution}
-Order matters when combining the EFI signature lists. A wrong order can lead to the key not being able
-to be unsealed and a prompt for a recovery key when booting.
-```
-
-```bash
-globalvar="8be4df61-93ca-11d2-aa0d-00e098032b8c"
-msguid="77fa9abd-0359-4d32-bd60-28f4e78f784b"
-rhguid="a0baa8a3-041d-48a8-bc87-c36d121b5e3d"
-
-cert-to-efi-sig-list -g $globalvar certs/PK-$globalvar-UbuntuOVMFSecureBootPKKEKkey.pem certs/PK.esl
-cert-to-efi-sig-list -g $msguid certs/db-$msguid-MicrosoftWindowsProductionPCA2011.pem certs/db-1.esl
-cert-to-efi-sig-list -g $msguid certs/db-$msguid-MicrosoftCorporationUEFICA2011.pem certs/db-2.esl
-cert-to-efi-sig-list -g $rhguid certs/KEK-$rhguid-UbuntuOVMFSecureBootPKKEKkey.pem certs/KEK-1.esl
-cert-to-efi-sig-list -g $msguid certs/KEK-$msguid-MicrosoftCorporationKEKCA2011.pem certs/KEK-2.esl
-```
-
-- Call the `create-uefi-config` tool (part of `encrypt-cloud-image`)
-
-```bash
-create-uefi-config -i uefi-config.json -i certs
+virt-fw-vars -i OVMF_VARS_4M.ms.fd --output-json vars.json
+python3 - <<'EOF'
+import base64, json
+with open("vars.json") as f:
+    variables = {v["name"]: v for v in json.load(f)["variables"]}
+config = {
+    name: base64.b64encode(bytes.fromhex(variables[name]["data"])).decode("ascii")
+    for name in ("PK", "KEK", "db", "dbx")
+}
+with open("uefi-config.json", "w") as f:
+    json.dump(config, f, indent=2)
+EOF
 ```
 
 Finally the deploy command can be called to create the final TPM bound image:
@@ -121,6 +111,8 @@ sudo encrypt-cloud-image deploy --srk-pub srk.pub \
 # This is the final image
 mv encrypted.vhd final.vhd
 ```
+
+The encrypted image must be booted with this same `OVMF_VARS_4M.ms.fd` copy.
 
 For more information about each command and their arguments please refer to their respective
 [reference pages](../reference/index).

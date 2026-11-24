@@ -26,19 +26,26 @@ First install dependencies that are needed:
 - `golang`, necessary for the `encrypt-cloud-image` tool
 - `swtpm`, provides a vTPM implementation
 - `tpm2-tools`, client library used to communicate with the vTPM
-- `efitools`, provides the `cert-to-efi-sig-list` tool
 - `virt-firmware`, provides the `virt-fw-vars` tool
 
 ```bash
-sudo apt install -y tpm2-tools golang swtpm efitools
+sudo apt install -y tpm2-tools golang swtpm
 ```
 
 ```bash
 pipx install virt-firmware
 ```
 
+````{note}
+`pipx install virt-firmware` can fail to build its `crypt_r` dependency if no C compiler is installed.
+On recent Ubuntu releases you can install the `python3-virt-firmware` package instead:
+
 ```bash
-go install github.com/canonical/encrypt-cloud-image/create-uefi-config@latest
+sudo apt install -y python3-virt-firmware
+```
+````
+
+```bash
 go install github.com/canonical/encrypt-cloud-image@latest
 ```
 
@@ -78,12 +85,33 @@ cloud-localds seed.img user-data.yaml
 
 ## Boot the image in QEMU
 
+Start the vTPM in a separate terminal. QEMU needs swtpm to be started with only a control socket,
+which is a different invocation from the one used with `tpm2-tools` during provisioning. Reuse the
+same state directory (`/tmp/mytpm0`), because an FDE key is sealed to the SRK stored in it:
+
+```bash
+swtpm socket --ctrl type=unixio,path=/tmp/mytpm0/swtpm-sock.ctrl \
+             --tpmstate dir=/tmp/mytpm0 \
+             --tpm2
+```
+
+swtpm exits when QEMU exits, so start it again before each boot.
+
+QEMU uses a local `OVMF_VARS_4M.ms.fd` copy of the UEFI variables:
+
+- for an image provisioned for [CVM with FDE](../how-to/encrypt-only.md), use the copy that
+  `uefi-config.json` was generated from. Don't overwrite it with a fresh copy, otherwise the FDE key
+  can't be unsealed.
+- for an [integrity-only image](../how-to/integrity-only.md), create the copy now:
+
+  ```bash
+  cp /usr/share/OVMF/OVMF_VARS_4M.ms.fd .
+  ```
+
 Finally the customized image can be booted in QEMU with something like:
 
 ```bash
 format="${FORMAT:-$(qemu-img info --output=json input.vhd | jq -r .format)}"
-
-cp /usr/share/OVMF/OVMF_VARS_4M.fd .
 
 qemu-system-x86_64 -cpu host \
                    -machine type=q35,accel=kvm \
@@ -98,6 +126,13 @@ qemu-system-x86_64 -cpu host \
                    -chardev socket,id=chrtpm,path=/tmp/mytpm0/swtpm-sock.ctrl \
                    -tpmdev emulator,id=tpm0,chardev=chrtpm \
                    -device tpm-tis,tpmdev=tpm0
+```
+
+```{note}
+On the first boot of the image, shim adds a boot entry and resets the system. If QEMU is started with
+`-no-reboot`, it exits after a message like `BdsDxe: starting Boot0002 ... Reset System`. This is
+expected, and boot entries aren't measured to PCR 7, so it doesn't affect unsealing. Start swtpm and
+QEMU again to continue booting.
 ```
 
 To connect to the running machine:
