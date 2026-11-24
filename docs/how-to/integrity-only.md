@@ -45,4 +45,7 @@ export TPM2TOOLS_TCTI="swtpm:path=/tmp/mytpm0/swtpm-sock"
 tpm2_createprimary
 ```
 
+This `--server` form of swtpm is only meant for `tpm2-tools`. Stop it before booting the image, and
+start swtpm with only a control socket for QEMU, as shown in [](../tutorials/local-testing.md).
+
 ````

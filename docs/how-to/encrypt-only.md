@@ -30,7 +30,8 @@ prerequisites:
 
 ### 1. Setting up a vTPM and generating an SRK primary key
 
-Using swtpm this is an example invocation to get a software TPM up and running:
+Using swtpm this is an example invocation to get a software TPM up and running so that
+`tpm2-tools` can talk to it:
 
 ```bash
 mkdir /tmp/mytpm0
@@ -48,6 +49,23 @@ export TPM2TOOLS_TCTI="swtpm:path=/tmp/mytpm0/swtpm-sock"
 tpm2_createprimary -c srk.ctx
 tpm2_readpublic -c srk.ctx -o srk.pub
 ```
+
+Once `srk.pub` has been created, stop this swtpm instance (for example with {kbd}`Ctrl+C`).
+
+````{important}
+This `--server` form of swtpm is only meant for `tpm2-tools`. QEMU often fails to connect to it with
+`tpm-emulator: Failed to send CMD_SET_DATAFD: Success`. To boot the image, start swtpm with only a
+control socket instead, as shown in [](../tutorials/local-testing.md):
+
+```bash
+swtpm socket --ctrl type=unixio,path=/tmp/mytpm0/swtpm-sock.ctrl \
+             --tpmstate dir=/tmp/mytpm0 \
+             --tpm2
+```
+
+Always reuse the `/tmp/mytpm0` state directory, because the FDE key is sealed to the SRK stored in it.
+swtpm exits when QEMU exits, so it needs to be started again before each boot.
+````
 
 ### 2. Preparing the guest's UEFI configuration
 
