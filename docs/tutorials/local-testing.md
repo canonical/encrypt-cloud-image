@@ -83,8 +83,6 @@ Finally the customized image can be booted in QEMU with something like:
 ```bash
 format="${FORMAT:-$(qemu-img info --output=json input.vhd | jq -r .format)}"
 
-cp /usr/share/OVMF/OVMF_VARS_4M.fd .
-
 qemu-system-x86_64 -cpu host \
                    -machine type=q35,accel=kvm \
                    -m 2048 \
